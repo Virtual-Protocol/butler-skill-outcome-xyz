@@ -1,66 +1,77 @@
 # Command Reference
 
-All commands use Butler's agent wallet credentials stored in bevo-server.
-`[--venue <id>]` is optional — omit for the default venue (`outcome`).
+All commands go through Butler's server; you never hold a key.
+`--venue <id>` is optional everywhere — omit it for the default venue (`outcome`). An
+unknown venue id is refused, never replaced with the default.
 
-## Reads (no idempotency key)
+## Reads (never take an idempotency key)
 
 ```sh
-# List supported venues and their status
+# Supported venues and whether each is reachable
 bevo-read prediction-venues
 
-# List open prediction markets
-bevo-read prediction-markets
-bevo-read prediction-markets --venue <id>
+# Search markets — open markets only, 10 per page by default
+bevo-read prediction-markets --query <keyword>
+bevo-read prediction-markets --query <keyword> --limit 20 --offset 20
+bevo-read prediction-markets --category <category>
+bevo-read prediction-markets --venue <id> --query <keyword>
+bevo-read prediction-markets --query <keyword> --include-closed   # past markets; never order from these
 
-# Check account balance and positions
+# Balance and open positions
 bevo-read prediction-account
 bevo-read prediction-account --venue <id>
 ```
 
-## Execution (always use an idempotency key)
+| Flag | Values | Notes |
+|------|--------|-------|
+| `--query <text>` | one or two plain keywords | Case-insensitive substring of the **event** title or description. "btc" does not match "Bitcoin". |
+| `--category <c>` | a category the venue lists | Narrows to one category. |
+| `--limit <n>` | 1–50, default 10 | Markets per page. |
+| `--offset <n>` | ≥ 0 | Skip this many markets (next page). |
+| `--include-closed` | — | Also return closed markets. For questions about the past only. |
+| `--venue <id>` | `outcome` | Omit for the default. |
+
+## Orders (always take an idempotency key)
+
+Each command files **one card** for your owner to approve in the app. Nothing is bought
+or sold until they approve it.
 
 ```sh
-# Buy (Back) — purchase outcome shares
+# Buy outcome shares at market
 bevo-prediction --market-id <id> --outcome <name> --side B --size <shares> --idempotency-key <KEY>:buy
-bevo-prediction --venue <id> --market-id <id> --outcome <name> --side B --size <shares> --idempotency-key <KEY>:buy
 
-# Buy with limit price
-bevo-prediction --market-id <id> --outcome <name> --side B --size <shares> --limit-price <0.00-1.00> --idempotency-key <KEY>:buy
+# Buy with a limit price
+bevo-prediction --market-id <id> --outcome <name> --side B --size <shares> --limit-price <0-1> --idempotency-key <KEY>:buy
 
-# Sell (Ask/Lay) — sell outcome shares from an open position
+# Sell shares you hold
 bevo-prediction --market-id <id> --outcome <name> --side A --size <shares> --idempotency-key <KEY>:sell
-bevo-prediction --venue <id> --market-id <id> --outcome <name> --side A --size <shares> --idempotency-key <KEY>:sell
 
-# Deposit USDC into the prediction account
-bevo-prediction --venue <id> --action deposit --amount <usdc> --idempotency-key <KEY>:deposit
-
-# Withdraw USDC from the prediction account
-bevo-prediction --venue <id> --action withdraw --amount <usdc> --idempotency-key <KEY>:withdraw
+# Another venue
+bevo-prediction --venue <id> --market-id <id> --outcome <name> --side B --size <shares> --idempotency-key <KEY>:buy
 ```
+
+| Flag | Values | Notes |
+|------|--------|-------|
+| `--market-id <id>` | from `prediction-markets` | Required. |
+| `--outcome <name>` | e.g. `Yes`, `No`, or a listed label | Exactly as the market lists it. |
+| `--side B` | buy | |
+| `--side A` | sell | Only shares step 3 shows you hold. |
+| `--size <n>` | **shares** | Never dollars. Shares × price ≥ $1. |
+| `--limit-price <p>` | 0–1, exclusive | Optional; market order if omitted. |
+| `--venue <id>` | `outcome` | Optional. |
+| `--idempotency-key <KEY>` | see below | Required. |
+
+Any flag not in this table is refused.
+
+The reply names the filed card and its approval id. An error, a timeout, or an unclear
+answer means the card may have been filed: do not re-run; check the app or the account.
 
 ## Key format
 
 ```
-pred:<venue>:<outcome>:<size>:<YYYYMMDD-HHMM>
+pred:<venue>:<outcome>:<shares>sh:<YYYYMMDD-HHMM>:<step>
 ```
 
-Example: `pred:outcome:yes:20usdc:20261113-1030`
-
-Add step suffix for each card: `:buy`, `:sell`, `:deposit`, `:withdraw`.
+Example: `pred:outcome:yes:40sh:20261113-1030:buy`
 
 A key is 1–128 letters, digits and `: _ . -`. Never reuse a key for a new errand.
-
-## Parameters
-
-| Parameter | Values | Notes |
-|-----------|--------|-------|
-| `--venue <id>` | `outcome` (default), future: `kalshi`, `polymarket` | Omit for default |
-| `--market-id <id>` | String from `prediction-markets` output | Required for orders |
-| `--outcome <name>` | e.g. `Yes`, `No`, or multi-outcome label | Exact name from market listing |
-| `--side B` | Buy (back) | B = buy an outcome |
-| `--side A` | Sell (ask/lay) | A = sell shares you hold |
-| `--size <n>` | Shares (buy/sell) or USDC (deposit/withdraw) | Shares × price ≥ $1 |
-| `--limit-price <p>` | 0.01–0.99 (probability) | Optional; market order if omitted |
-| `--action deposit` | | Deposit USDC into the account |
-| `--action withdraw` | | Withdraw USDC to Butler's wallet |
