@@ -24,7 +24,7 @@ bevo-read prediction-account --venue <id>
 
 | Flag | Values | Notes |
 |------|--------|-------|
-| `--query <text>` | one or two plain keywords | Case-insensitive substring of the **event** title or description. "btc" does not match "Bitcoin". |
+| `--query <text>` | one or two plain keywords | Every word must appear in the event, question or an outcome name (case-insensitive). "btc" does not match "Bitcoin". |
 | `--category <c>` | a category the venue lists | Narrows to one category. |
 | `--limit <n>` | 1–50, default 10 | Markets per page. |
 | `--offset <n>` | ≥ 0 | Skip this many markets (next page). |
