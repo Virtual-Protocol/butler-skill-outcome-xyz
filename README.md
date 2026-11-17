@@ -1,7 +1,7 @@
 # butler-skill-prediction-market
 
-Butler skill for prediction market trading. Gives the Butler LLM agent a complete
-playbook for reading and executing on prediction markets via bevo-server's API.
+Butler skill for prediction market trading. Gives Butler a playbook for searching markets,
+reading an owner's prediction account, and filing buy and sell orders for approval.
 
 **Current venue**: Outcome.xyz (Hyperliquid HIP-4)  
 **Planned**: Kalshi, Polymarket API (distinct from `butler-skill-polymarket-web`)
@@ -10,46 +10,34 @@ playbook for reading and executing on prediction markets via bevo-server's API.
 
 When installed, Butler can:
 
-- List available prediction market venues
-- Browse open markets on any supported venue
-- Read the agent's prediction account balance and open positions
-- Buy and sell outcome shares (market or limit orders)
-- Deposit USDC into a prediction account
-- Withdraw USDC back to the agent wallet
+- List supported prediction market venues
+- Search open markets by keyword or category
+- Read the owner's prediction account balance and open positions
+- File buy and sell orders (market or limit) — each one a card the owner approves in the
+  app before anything is placed
 
-Every money-moving action files an approval card — the owner taps to confirm.
+Deposits and withdrawals are not part of this skill.
 
-## Architecture
+## Commands it uses
 
-The skill calls two bevo-server binaries that the agent container has:
-
-| Binary | Purpose |
-|--------|---------|
+| Command | Purpose |
+|---------|---------|
 | `bevo-read prediction-venues` | List venues and their status |
-| `bevo-read prediction-markets [--venue id]` | List open markets |
+| `bevo-read prediction-markets [--query …] [--venue id]` | Search open markets |
 | `bevo-read prediction-account [--venue id]` | Read balance and positions |
-| `bevo-prediction [--venue id] ...` | Place orders, deposit, withdraw |
+| `bevo-prediction …` | File a buy or sell order card |
 
-bevo-server's prediction routes (`/butler-read/prediction/*`, `/butler-exec/prediction`)
-handle the venue abstraction — adding a new venue requires only bevo-server changes, not
-a skill update.
+Both commands are provided by the Butler agent runtime; the skill installs only where they
+are available. `references/commands.md` has every flag.
 
-## Venue credentials
+## Connecting a venue
 
-Each prediction venue requires a per-owner credential stored encrypted in bevo-server's
-`venue_credentials` table (`VenueCredential` Prisma model). The owner sets this up in Butler
-settings. Butler cannot do this setup step autonomously.
+The owner connects each venue in the Butler app. Butler cannot do this step itself, and it
+never sees or handles a private key.
 
-## Related skills and tools
+## Related skills
 
 | Package | What it covers |
 |---------|---------------|
 | `butler-skill-polymarket-web` | Polymarket via browser automation (separate, not API) |
-| `butler-skill-variational` | Variational Omni perps (different command set, `acp site variational`) |
-
-## Development
-
-bevo-server routes: `server/routes/butlerPrediction.ts`  
-Venue abstraction: `server/services/predictionMarketVenue.ts`  
-Outcome.xyz impl: `server/services/outcomePredictionVenue.ts`  
-virtuals-agent tools: `src/mastra/tools/prediction.ts`
+| `butler-skill-variational` | Variational Omni perps |
