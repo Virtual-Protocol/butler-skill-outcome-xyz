@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.0
+
+- Removed deposit and withdrawal everywhere, including withdrawal minimums and routing in
+  `references/venues.md`.
+- Wallet framing: the agent key signs for the owner's own account; it is not a separate
+  wallet.
+- `--size` is always shares. Unknown flags and unknown venue ids are refused, never
+  dropped or swapped for the default.
+- Market search: `bevo-read prediction-markets` takes `--query`, `--category`, `--limit`
+  (default 10, max 50), `--offset` and `--include-closed`; open markets only by default.
+  `--query` matches event titles and descriptions only.
+- An order's reply is a filed card with an approval id, not a fill: the skill now tells
+  the owner to approve it and reads the account afterwards.
+- Docs no longer describe Butler's server internals.
+
 ## 0.1.0
 
 - First version. Covers Outcome.xyz (Hyperliquid HIP-4) as the first supported prediction
