@@ -2,7 +2,7 @@
 name: prediction-market
 description: "Look up and trade on prediction markets: list venues, search markets, check balances and positions (read live, never from memory), buy/sell outcome shares, each order a card the owner approves. Venue: Outcome.xyz (Hyperliquid HIP-4) now; Kalshi and Polymarket API in future."
 version: 0.6.0
-metadata: {"butler":{"moneyMoving":true,"keywords":["prediction market","outcome","outcome.xyz","buy yes","buy no","sell prediction","prediction market balance","prediction market account","buy outcome","sell outcome","HIP-4","hyperliquid prediction","kalshi","prediction market positions","prediction market shares","open prediction","close prediction","prediction balance"],"requires":{"bins":["bevo-read","bevo-prediction"]}}}
+metadata: {"butler":{"moneyMoving":true,"keywords":["prediction market","outcome","outcome.xyz","buy yes","buy no","sell prediction","prediction market balance","prediction market account","buy outcome","sell outcome","HIP-4","hyperliquid prediction","kalshi","prediction market positions","prediction market shares","open prediction","close prediction","prediction balance"],"requires":{"bins":["bevo-read","bevo-prediction","bevo-exec"]}}}
 ---
 
 ## When to use
@@ -64,12 +64,12 @@ There are two ways to fix this:
 - **Enable Unified Account mode** (recommended): This pools spot and perp USDC so both
   sub-accounts are usable for trading. No funds need to be moved. Unified Account is **not the
   default** — a new Hyperliquid account starts in Standard mode.
-  - **In a duty session** (automated duty): run `bevo-prediction --action enable-unified`. This
+  - **In a duty session** (automated duty): run `bevo-exec POST /prediction/enable-unified`. This
     registers unified mode on the duty wallet server-side with no owner action required.
   - **In a user session**: tell the owner to go to Hyperliquid → Settings → Account Type →
     select **Unified Account**.
 - **Transfer USDC to spot**: Moves a specific amount from perp to spot.
-  - **In a duty session**: run `bevo-prediction --action transfer-to-spot --amount <amount>`.
+  - **In a duty session**: run `bevo-exec POST /prediction/transfer-to-spot '{"amount":"<amount>"}'`.
   - **In a user session**: tell the owner to use Internal Transfer on Hyperliquid.
 
 The `bevo-read prediction-account` command returns `needsUnifiedAccount: true` when the owner's
@@ -225,14 +225,14 @@ wallet must be bound at creation time.
    unified account mode on the duty wallet:
 
    ```sh
-   bevo-prediction --action enable-unified
+   bevo-exec POST /prediction/enable-unified
    ```
 
    If this returns `unified: true`, re-run `bevo-read prediction-account` to confirm. If the
    action is refused (`hl_action_refused`), fall back to the transfer path:
 
    ```sh
-   bevo-prediction --action transfer-to-spot --amount <hlPerpUsdcWithdrawable>
+   bevo-exec POST /prediction/transfer-to-spot '{"amount":"<hlPerpUsdcWithdrawable>"}'
    ```
 
    After either succeeds, re-run `bevo-read prediction-account` and continue to step 4.
@@ -260,7 +260,7 @@ wallet must be bound at creation time.
      shortfall, automatically transfer the needed amount from perp to spot:
 
      ```sh
-     bevo-prediction --action transfer-to-spot --amount <shortfall>
+     bevo-exec POST /prediction/transfer-to-spot '{"amount":"<shortfall>"}'
      ```
 
      After success, re-run `bevo-read prediction-account` and proceed if the balance is now
@@ -349,7 +349,7 @@ Error codes the server returns and what to do:
 | `no_pending_setup` | 409 | App setup | Setup session expired (10 min TTL) | Owner must re-open the setup flow from the app. |
 | `not_connected` | 409 | place_order | No credentials for this venue (or the duty's wallet is not registered in a duty session) | Run `bevo-prediction --action setup` (step 3). In a duty session this registers the duty wallet automatically. |
 | `agent_not_approved` | 409 | place_order | Credentials exist but Hyperliquid has not approved the key yet | Owner must complete or re-do setup. |
-| `insufficient_spot_balance` | 409 | place_order | USDC is in the Hyperliquid perp account, not spot — HIP-4 needs spot USDC | **Duty session**: auto-call `bevo-prediction --action enable-unified` first; if refused, call `bevo-prediction --action transfer-to-spot --amount <perpBalance>`; then retry the order. **User session**: tell owner to enable Unified Account mode in Hyperliquid Settings → Account Type to pool both accounts, then retry. |
+| `insufficient_spot_balance` | 409 | place_order | USDC is in the Hyperliquid perp account, not spot — HIP-4 needs spot USDC | **Duty session**: auto-call `bevo-exec POST /prediction/enable-unified` first; if refused, call `bevo-exec POST /prediction/transfer-to-spot '{"amount":"<perpBalance>"}'`; then retry the order. **User session**: tell owner to enable Unified Account mode in Hyperliquid Settings → Account Type to pool both accounts, then retry. |
 | `hl_action_refused` | 409 | transfer-to-spot, enable-unified | Hyperliquid refused the action (e.g. already in unified mode, zero balance) | Report the reason from the error message. If enabling unified was refused but perp balance > 0, try `transfer-to-spot` as a fallback. |
 | `hl_action_unverified` | 502 | transfer-to-spot, enable-unified | Hyperliquid did not confirm whether the action landed | Do not retry. Re-read the account with `bevo-read prediction-account` to check the current state before proceeding. |
 | `market_closed` | 409 | place_order | Market is not accepting orders | Tell owner this market is closed; find another via step 2. |
