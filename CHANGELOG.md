@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.2.0
+## 1.0.1
 
 - Scripts never name a wallet: the server picks it from the session (a duty with its own
   wallet uses it, else the owner's main wallet). `--sign-by-duty-wallet` is a legacy no-op
@@ -10,8 +10,6 @@
   container must be redeployed onto the current image.
 - A duty for this skill is always filed with its own wallet and `autoExecute: true`; without
   it every step is a card. New error row `DUTY_DELETED` (the duty was deleted; stop).
-
-## 1.1.0
 
 - New `withdraw.mjs`: withdraw USDC from Hyperliquid to Arbitrum, always to the signing
   wallet itself (no destination flag). `--amount <usdc>` or `--all`, minimum 2 USDC, flat
