@@ -65,15 +65,17 @@ A card step waits ~1.5 min: tell your owner BEFORE you run it. Per script:
    a minute); `needs_spot` → step 4 with `next.suggestedSpotAmount`; `ready` → step 5 (if
    `next.code` is `AGENT_EXPIRING`, first ask to renew). After steps 2–4, status again.
 
-2. [FIXED] **Deposit**: Hyperliquid credits nothing under 5 USDC and acp's bridge takes a few
-   cents, so send ≥ 5.5 through acp (it pulls USDC from any of this wallet's chains into its
-   own Hyperliquid account; never add `--recipient`):
+2. [FIXED] **Deposit** with acp (USDC from any of this wallet's chains into its own
+   Hyperliquid account; never add `--recipient`). It credits about the amount − 0.2; the
+   FIRST deposit into a wallet new to Hyperliquid likely loses ~1 more, so send ≥ bets + 1.5
+   (`next.depositCommand` sizes it; never under 5.5):
 
    ```sh
    acp trade --token-in usdc --amount-in 5.5 --token-out usdc --chain-out 1337 --idempotency-key pm-dep-1119-1030 --json
    ```
 
-   `Trade accepted` → status until credited; never deposit again. No `acp` (`command -v acp`
+   `Trade accepted` → status until Hyperliquid covers the next step's need (never wait for
+   the full amount sent); never deposit again. No `acp` (`command -v acp`
    empty): `deposit.mjs --amount 5` (direct transfer, ≥ 5; Arbitrum USDC only,
    `references/deposit.md`).
 
@@ -172,7 +174,7 @@ then retry ONCE with a new key. `OWNER_DECLINED`: nothing ran. Full table: `refe
 
 - Outcome.xyz / HIP-4 on Hyperliquid mainnet only. Limit orders only, whole shares, $2
   minimum per order (sells too).
-- 5 USDC credited, so send ≥ 5.5 through acp; `deposit.mjs` direct transfer needs ≥ 5. Withdraw ≥ 2 USDC, only to the same wallet ($1
+- Deposit: ≥ 5.5 through acp (first one ≥ bets + 1.5); `deposit.mjs` direct transfer ≥ 5. Withdraw ≥ 2 USDC, only to the same wallet ($1
   fee). No account-mode change. A share pays $1 if its side wins, else $0.
 
 ## Say to the owner

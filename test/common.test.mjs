@@ -968,7 +968,16 @@ test("deposit guidance points to acp's move into Hyperliquid first, sending at l
   const next = computeNext({ hl, arb: { usdc: 0 }, agent: null, need: 2 });
   assert.equal(next.status, "needs_deposit");
   assert.equal(next.suggestedDepositUsdc, 5);
-  assert.equal(next.depositCommand, acpDepositCommand(5));
-  assert.match(next.depositCommand, /--amount-in 5\.5 /);
+  assert.equal(next.depositCommand, acpDepositCommand(5.5));
+  assert.equal(next.firstDeposit, true);
+  assert.match(next.creditNote, /~1 USDC/);
+  const first = computeNext({ hl, arb: null, agent: null, need: 10 });
+  assert.equal(first.acpSendUsdc, 11.5);
+  assert.match(first.depositCommand, /--amount-in 11\.5 /);
+  const topUp = computeNext({ hl: { ...hl, role: "user", spotUsdcFree: 1 }, arb: null, agent: null, need: 20 });
+  assert.equal(topUp.firstDeposit, false);
+  assert.equal(topUp.acpSendUsdc, 19.3);
+  assert.doesNotMatch(topUp.creditNote, /~1 USDC/);
+  assert.match(topUp.creditNote, /never wait for the full amount/);
   assert.match(next.fallback, /deposit\.mjs --amount 5/);
 });

@@ -41,9 +41,11 @@ older container stops with `SIGNER_OUTDATED` and must be redeployed first.
   (`acp trade --token-in usdc --amount-in <usd> --token-out usdc --chain-out 1337`), which takes
   USDC from any of the wallet's chains into the signing wallet's own Hyperliquid account.
   `deposit.mjs` (Arbitrum USDC → Bridge2) is the fallback when `acp` is not installed; its
-  shortfall hints and `status.mjs`'s `next.depositCommand` name the acp command first. The 5 USDC
-  floor holds for both: acp's bridge fee comes out of the amount, so
-  the acp command sends at least 5.5 USDC; `deposit.mjs` keeps ≥ 5. A duty's built-in funding card (USDC on Base) is enough. `acp` joins
+  shortfall hints and `status.mjs`'s `next.depositCommand` name the acp command first. acp credits
+  about the amount minus 0.2 USDC, as a Hyperliquid `send` (the Bridge2 5 USDC floor does not
+  apply); the first acp deposit into a wallet new to Hyperliquid likely loses ~1 USDC more, so
+  `next.depositCommand` sends the gap + 1.5 then (+ 0.3 later), never under 5.5. Continue once
+  status covers the next step's need, never wait for the full amount. `deposit.mjs` keeps ≥ 5. A duty's built-in funding card (USDC on Base) is enough. `acp` joins
   `requires.bins`.
 - SKILL.md body cut to under 9,000 characters: the duty procedure, the failure table and the
   per-script signing table moved to `references/duty.md`, `failures.md`, `actions.md`;

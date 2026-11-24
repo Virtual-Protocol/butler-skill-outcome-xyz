@@ -1283,6 +1283,13 @@ export function resolveSideIndex(outcome, sides) {
 
 export const HL_ACP_CHAIN_ID = 1337;
 export const MIN_ACP_DEPOSIT_USDC = 5.5;
+export const ACP_BRIDGE_MARGIN_USDC = 0.3;
+export const ACP_FIRST_DEPOSIT_MARGIN_USDC = 1.5;
+
+export function acpDepositAmount(gap, { firstDeposit = false } = {}) {
+  const margin = firstDeposit ? ACP_FIRST_DEPOSIT_MARGIN_USDC : ACP_BRIDGE_MARGIN_USDC;
+  return Math.max(MIN_ACP_DEPOSIT_USDC, ceilCents(Math.max(0, gap) + margin));
+}
 
 export function acpDepositCommand(amount) {
   const usd = decimalString(Math.max(MIN_ACP_DEPOSIT_USDC, ceilCents(amount)), 2);
@@ -1292,7 +1299,8 @@ export function acpDepositCommand(amount) {
 export function depositShortfallHint(amount) {
   return (
     `Deposit with acp instead: \`${acpDepositCommand(amount)}\` pulls USDC from any of this wallet's chains ` +
-    "(never add --recipient). Only without acp: the owner adds native USDC (not USDC.e) on Arbitrum."
+    "(never add --recipient); if this wallet never held funds on Hyperliquid, add 1.5 for the first-deposit loss. " +
+    "Only without acp: the owner adds native USDC (not USDC.e) on Arbitrum."
   );
 }
 
@@ -1301,6 +1309,8 @@ export function computeNext({ hl, arb, agent, need = MIN_ORDER_NOTIONAL }) {
   const hlTotal = hl.unified ? hl.spotUsdcFree : round6(hl.spotUsdcFree + hl.perpsWithdrawable);
   if (hl.role === "missing" || hlTotal < need) {
     const shortfall = Math.max(MIN_DEPOSIT_USDC, ceilCents(need - hlTotal));
+    const firstDeposit = hl.role === "missing";
+    const acpSendUsdc = acpDepositAmount(ceilCents(need - hlTotal), { firstDeposit });
     return {
       status: "needs_deposit",
       reason:
@@ -1308,7 +1318,10 @@ export function computeNext({ hl, arb, agent, need = MIN_ORDER_NOTIONAL }) {
           ? "This wallet has never deposited to Hyperliquid."
           : `Hyperliquid holds $${hlTotal} USDC; $${need} is needed.`,
       suggestedDepositUsdc: shortfall,
-      depositCommand: acpDepositCommand(shortfall),
+      depositCommand: acpDepositCommand(acpSendUsdc),
+      acpSendUsdc,
+      firstDeposit,
+      creditNote: `acp credits about the amount minus ~0.2 USDC${firstDeposit ? ", and this first deposit into a wallet new to Hyperliquid likely loses ~1 USDC more" : ""}. Continue once status shows $${need} on Hyperliquid; never wait for the full amount sent.`,
       fallback: `No acp: deposit.mjs --amount ${decimalString(shortfall, 2)} (Arbitrum USDC only).`,
       arbitrumUsdcEnough: arb ? arb.usdc >= shortfall : null,
     };

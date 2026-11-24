@@ -6,8 +6,9 @@ scripts as chat. Read this before filing one.
 ## Funding the duty wallet
 
 **Default (acp available):** file the duty with its own new wallet (`"wallet": "new"`) and its
-built-in funding card (`fundUsdc`, USDC on Base). That is one owner card. Size it at least
-5.5 USDC (5 must be credited after acp's bridge fee) plus what the duty will bet. The duty's deposit step (SKILL.md step 2, `acp trade … --chain-out 1337`) runs
+built-in funding card (`fundUsdc`, USDC on Base). That is one owner card. A duty wallet is
+new to Hyperliquid, so its first acp deposit loses about 1.2 USDC (bridge plus a likely
+first-send fee): size the card at least the bets + 1.5, never under 5.5. The duty's deposit step (SKILL.md step 2, `acp trade … --chain-out 1337`) runs
 in the duty's session, so it pulls the duty wallet's USDC from whatever chain holds it (Base
 here) into the duty wallet's own Hyperliquid account. No Arbitrum funding is needed.
 
@@ -37,6 +38,12 @@ Every script prints `walletScope`. Before the first money step of a duty, read i
 the duty's own wallet; `main` means the duty is trading the owner's main wallet. In that case
 say so in the duty's first note so the owner sees which wallet it uses. Do not refuse: the
 container decides the wallet, the skill only reports it.
+
+## Waiting for a deposit
+
+After the deposit step, run `status.mjs --need <next step's amount>` and continue as soon as
+it no longer says `needs_deposit`. Never wait for the full amount sent to arrive: bridge and
+first-send fees mean it never does.
 
 ## Each tick
 

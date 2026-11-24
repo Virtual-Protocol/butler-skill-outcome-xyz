@@ -65,8 +65,10 @@ any wallet with no signer and skips the trading-key check.
   `perpsAccountValue`.
 - `arbitrum`: `usdc`, `eth` of the wallet on Arbitrum, or `{error}`.
 - `next`: `{status, reason}` plus, per status: `suggestedDepositUsdc`, `depositCommand`
-  (acp's move into Hyperliquid, the preferred deposit; never under 5.5 USDC so that 5 is
-  credited after the bridge fee), `fallback` (`deposit.mjs` without acp)
+  (acp's move into Hyperliquid, the preferred deposit), `acpSendUsdc` (what it sends: the
+  gap plus 0.3, or plus 1.5 for a `firstDeposit` into a wallet new to Hyperliquid, never under
+  5.5), `firstDeposit`, `creditNote` (continue once status covers `--need`, never wait for the
+  full amount), `fallback` (`deposit.mjs` without acp)
   and `arbitrumUsdcEnough` (only matters for that fallback) (needs_deposit), `code` and `rotate` (needs_agent),
   `suggestedSpotAmount` (needs_spot), `code: "AGENT_EXPIRING"` (ready but renew soon).
   `rotate` is true only for an expiring key (`needs_agent` with `AGENT_EXPIRING`).
