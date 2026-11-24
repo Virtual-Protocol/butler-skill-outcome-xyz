@@ -7,8 +7,7 @@ scripts as chat. Read this before filing one.
 
 **Default (acp available):** file the duty with its own new wallet (`"wallet": "new"`) and its
 built-in funding card (`fundUsdc`, USDC on Base). That is one owner card. Size it at least
-5 USDC (Hyperliquid credits nothing less) plus what the duty will bet, plus a small buffer for
-the move's fees. The duty's deposit step (SKILL.md step 2, `acp trade … --chain-out 1337`) runs
+5.5 USDC (5 must be credited after acp's bridge fee) plus what the duty will bet. The duty's deposit step (SKILL.md step 2, `acp trade … --chain-out 1337`) runs
 in the duty's session, so it pulls the duty wallet's USDC from whatever chain holds it (Base
 here) into the duty wallet's own Hyperliquid account. No Arbitrum funding is needed.
 
@@ -25,6 +24,12 @@ on Arbitrum One (chain 42161), and the built-in card funds Base. So:
    wallet holding money files a **bind card**; the duty is held until the owner approves it.
 
 Tell the owner which cards they will see before the first one.
+
+## Calling commands from a duty
+
+A duty calls every command by its bare name (`["acp", "trade", ...]`, `bevo-wallet`, `node`),
+never by an absolute path: the duty's own launchers on its PATH carry its session and wallet,
+so an absolute path would run without them (the wrong wallet, or no session at all).
 
 ## Which wallet a run uses
 

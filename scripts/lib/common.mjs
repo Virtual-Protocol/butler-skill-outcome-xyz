@@ -1282,9 +1282,10 @@ export function resolveSideIndex(outcome, sides) {
 // ---------------------------------------------------------------------------
 
 export const HL_ACP_CHAIN_ID = 1337;
+export const MIN_ACP_DEPOSIT_USDC = 5.5;
 
 export function acpDepositCommand(amount) {
-  const usd = decimalString(Math.max(MIN_DEPOSIT_USDC, amount), 2);
+  const usd = decimalString(Math.max(MIN_ACP_DEPOSIT_USDC, ceilCents(amount)), 2);
   return `acp trade --token-in usdc --amount-in ${usd} --token-out usdc --chain-out ${HL_ACP_CHAIN_ID} --idempotency-key <new key> --json`;
 }
 

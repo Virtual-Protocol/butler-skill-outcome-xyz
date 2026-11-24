@@ -6,7 +6,7 @@ to SKILL.md's `## Procedure`. Every code a script can print, with its meaning, i
 
 | `error.code` | Do |
 | --- | --- |
-| `BAD_ARGS`, `AMOUNT_BELOW_MINIMUM`, `ORDER_BELOW_MINIMUM`, `BAD_PRICE`, `MARKET_ORDER_REFUSED` | fix the flags, never invent any; deposit ≥ 5, withdraw ≥ 2, orders ≥ $2, limit only |
+| `BAD_ARGS`, `AMOUNT_BELOW_MINIMUM`, `ORDER_BELOW_MINIMUM`, `BAD_PRICE`, `MARKET_ORDER_REFUSED` | fix the flags, never invent any; deposit ≥ 5.5 via acp (≥ 5 via `deposit.mjs`), withdraw ≥ 2, orders ≥ $2, limit only |
 | `INSUFFICIENT_USDC`, `NEEDS_HEADROOM` (from the `deposit.mjs` fallback) | deposit with acp (step 2) instead, it uses any chain; without acp the owner sends native USDC (not USDC.e) on Arbitrum, or deposit the hint's smaller amount |
 | `NEEDS_DEPOSIT`, `NEEDS_SPOT` | step 2, step 4 (hint's amount) |
 | `AGENT_INVALID` | step 3 plain, then retry the failed command ONCE with a new key. Never re-approve an old key address |

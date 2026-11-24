@@ -956,9 +956,11 @@ test("labelAgents: only our name with no stored key is the revoke placeholder; o
   assert.equal(revoked[0].approved, true);
 });
 
-test("deposit guidance points to acp's move into Hyperliquid first, with the 5 USDC floor", () => {
+test("deposit guidance points to acp's move into Hyperliquid first, sending at least 5.5 so 5 is credited", () => {
   assert.equal(acpDepositCommand(12.5), "acp trade --token-in usdc --amount-in 12.5 --token-out usdc --chain-out 1337 --idempotency-key <new key> --json");
-  assert.match(acpDepositCommand(1), /--amount-in 5 /);
+  assert.match(acpDepositCommand(1), /--amount-in 5\.5 /);
+  assert.match(acpDepositCommand(5), /--amount-in 5\.5 /);
+  assert.match(acpDepositCommand(5.51), /--amount-in 5\.51 /);
   assert.doesNotMatch(acpDepositCommand(7), /--recipient /);
   const hint = depositShortfallHint(6);
   assert.ok(hint.indexOf("acp trade") < hint.indexOf("Arbitrum"));
@@ -967,5 +969,6 @@ test("deposit guidance points to acp's move into Hyperliquid first, with the 5 U
   assert.equal(next.status, "needs_deposit");
   assert.equal(next.suggestedDepositUsdc, 5);
   assert.equal(next.depositCommand, acpDepositCommand(5));
+  assert.match(next.depositCommand, /--amount-in 5\.5 /);
   assert.match(next.fallback, /deposit\.mjs --amount 5/);
 });

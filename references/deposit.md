@@ -2,8 +2,10 @@
 
 ## Minimum
 
-Hyperliquid credits nothing under **5 USDC**: a smaller deposit is lost. Both paths below keep
-the 5 USDC floor.
+Hyperliquid credits nothing under **5 USDC**: a smaller deposit is lost. acp's move pays a
+bridge fee out of the amount (about $0.02 seen live), so `--amount-in 5` lands about 4.98 and
+is lost. Floor: **5 USDC credited, so send ≥ 5.5 through acp; `deposit.mjs` direct transfer
+needs ≥ 5** (it moves the exact amount; its gas is separate).
 
 ## Preferred: acp's aggregated move (SKILL.md step 2)
 
