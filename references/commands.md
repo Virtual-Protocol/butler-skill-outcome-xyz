@@ -64,8 +64,9 @@ any wallet with no signer and skips the trading-key check.
   `spotUsdcFree`, `spotUsdcHold` (locked in open orders), `perpsWithdrawable`,
   `perpsAccountValue`.
 - `arbitrum`: `usdc`, `eth` of the wallet on Arbitrum, or `{error}`.
-- `next`: `{status, reason}` plus, per status: `suggestedDepositUsdc` and
-  `arbitrumUsdcEnough` (needs_deposit), `code` and `rotate` (needs_agent),
+- `next`: `{status, reason}` plus, per status: `suggestedDepositUsdc`, `depositCommand`
+  (acp's move into Hyperliquid, the preferred deposit), `fallback` (`deposit.mjs` without acp)
+  and `arbitrumUsdcEnough` (only matters for that fallback) (needs_deposit), `code` and `rotate` (needs_agent),
   `suggestedSpotAmount` (needs_spot), `code: "AGENT_EXPIRING"` (ready but renew soon).
   `rotate` is true only for an expiring key (`needs_agent` with `AGENT_EXPIRING`).
 
@@ -108,6 +109,10 @@ size in shares). A market no longer live but settled returns
 ## Money-moving
 
 ### deposit.mjs (wallet signature: card on the main wallet)
+
+Fallback only, when `command -v acp` is empty; the preferred deposit is acp's move
+(`deposit.md`). Its `INSUFFICIENT_USDC` / `NEEDS_HEADROOM` hints and `data.depositCommand`
+name that acp command first.
 
 `--amount <usdc> [--idempotency-key <key>]` or `--resume <key>`
 

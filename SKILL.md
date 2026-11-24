@@ -2,7 +2,7 @@
 name: prediction-market
 description: "Bet on Outcome.xyz prediction markets (Hyperliquid HIP-4): find markets, fund or withdraw from Hyperliquid, set up the trading key, place or cancel limit orders, read positions. Runs scripts."
 version: 2.0.0
-metadata: {"butler":{"moneyMoving":true,"keywords":["prediction market","outcome","outcome.xyz","HIP-4","hyperliquid prediction","bet on","buy yes","buy no","sell prediction","prediction positions","prediction balance","cancel prediction order","deposit hyperliquid","withdraw from hyperliquid","withdraw prediction","trading key"],"requires":{"bins":["bevo-wallet","node","npm"]}}}
+metadata: {"butler":{"moneyMoving":true,"keywords":["prediction market","outcome","outcome.xyz","HIP-4","hyperliquid prediction","bet on","buy yes","buy no","sell prediction","prediction positions","prediction balance","cancel prediction order","deposit hyperliquid","withdraw from hyperliquid","withdraw prediction","trading key"],"requires":{"bins":["acp","bevo-wallet","node","npm"]}}}
 ---
 
 ## When to use
@@ -32,28 +32,19 @@ in every command. The scripts: `scripts/status.mjs`, `scripts/markets.mjs`,
 
 ### Credentials
 
-The only credential is the **trading key**: a Hyperliquid "agent" (name `Butler`) that
-places and cancels orders and moves USDC between the account's own perps and spot, and can
-never withdraw.
-
-- **Lives in** your private vault, item `outcome.<wallet>`. Scripts read it; you never
-  fetch, print or describe it.
-- **Made by** `setup_agent.mjs`: saved in the vault, then approved on Hyperliquid with ONE
-  wallet signature (a card on the main wallet; none in a duty's own live auto-execute session).
-- **Checked against Hyperliquid before every use.** Approvals lapse after ~90 days: renew
-  under 7 days left (step 3 `--rotate`, on your owner's yes). No key or an invalid one:
-  `setup_agent.mjs`; a trading script in a duty repairs it by itself.
-- **Retire:** `revoke_agent.mjs`. A vault not restored yet (`vaultState: "pending"`) means
-  no key here: `setup_agent.mjs` makes a fresh one.
-
-Depth: `references/credentials.md`, `hyperliquid-sdk.md`, `commands.md`.
+The only credential is the **trading key**, a Hyperliquid "agent" (name `Butler`) kept in
+your private vault: it places and cancels orders and moves USDC between the account's own
+perps and spot, and can never withdraw. Scripts read it; you never fetch, print or describe
+it. `setup_agent.mjs` makes it (one wallet signature) and every script checks it against
+Hyperliquid first. A vault not restored yet (`vaultState: "pending"`) means no key here:
+`setup_agent.mjs` makes a fresh one. Full detail: `references/credentials.md`.
 
 ### Which wallet and cards
 
 Scripts never name a wallet: a duty with its own wallet uses it, anywhere else it is the
 owner's main wallet and every wallet signature is a **card** (`walletScope` says which).
-**Always file a duty for this skill with its own wallet and `autoExecute: true`.** A card
-step waits ~1.5 min: tell your owner BEFORE you run it.
+A card step waits ~1.5 min: tell your owner BEFORE you run it. Per script:
+`references/actions.md`.
 
 ### Never place an order unless
 
@@ -69,25 +60,20 @@ step waits ~1.5 min: tell your owner BEFORE you run it.
    node "${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market/scripts/status.mjs" --need 20
    ```
 
-   Act on `data.next.status`:
+   `data.next.status`: `needs_deposit` → step 2 with `next.suggestedDepositUsdc`;
+   `needs_agent` → step 3 (`--rotate` only for `AGENT_EXPIRING`; `VAULT_UNAVAILABLE`: retry in
+   a minute); `needs_spot` → step 4 with `next.suggestedSpotAmount`; `ready` → step 5 (if
+   `next.code` is `AGENT_EXPIRING`, first ask to renew). After steps 2–4, status again.
 
-   | `next.status` | Do |
-   | --- | --- |
-   | `needs_deposit` | step 2 with at least `next.suggestedDepositUsdc`; `arbitrumUsdcEnough: false` → ask your owner to send native USDC on Arbitrum to `mainWallet` |
-   | `needs_agent` | `VAULT_UNAVAILABLE`: retry in a minute; else step 3 (`--rotate` only for `AGENT_EXPIRING`) |
-   | `needs_spot` | step 4 with `next.suggestedSpotAmount` |
-   | `ready` | step 5; if `next.code` is `AGENT_EXPIRING`, first tell your owner the key expires in `agent.daysLeft` days and ask to renew (step 3 `--rotate`) |
-
-   After steps 2–4, run status again.
-
-2. [FIXED] **Deposit** (Arbitrum USDC → Hyperliquid, ≥ 5 USDC; less is lost):
+2. [FIXED] **Deposit** (≥ 5 USDC; Hyperliquid credits nothing less). acp pulls USDC from any
+   of this wallet's chains into its own Hyperliquid account; never add `--recipient`:
 
    ```sh
-   node "${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market/scripts/deposit.mjs" --amount 5 --idempotency-key pm-dep-1119-1030
+   acp trade --token-in usdc --amount-in 5 --token-out usdc --chain-out 1337 --idempotency-key pm-dep-1119-1030 --json
    ```
 
-   `deposit_pending` → sent: run status.mjs in a minute; never deposit again
-   (`data.resume` only re-checks). Gas is paid in USDC: keep 0.5 above the amount.
+   `Trade accepted` → status until credited; never deposit again. No `acp` (`command -v acp`
+   empty): `deposit.mjs --amount 5` (Arbitrum USDC only, `references/deposit.md`).
 
 3. [FIXED] **Set up, repair or renew the trading key** (needs a prior deposit):
 
@@ -96,9 +82,8 @@ step waits ~1.5 min: tell your owner BEFORE you run it.
    node "${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market/scripts/setup_agent.mjs" --rotate --idempotency-key pm-key-1119-1031
    ```
 
-   Run ONE. Plain: a listed key → `alreadyApproved: true`, nothing signed; none or an
-   invalid one → a fresh key, one wallet signature. `--rotate` replaces it at once: only to
-   renew on your owner's yes.
+   Run ONE. Plain: a listed key → `alreadyApproved: true`; none or invalid → a fresh key, one
+   wallet signature. `--rotate` replaces it at once: only to renew on your owner's yes.
 
 4. [FIXED] **Spot USDC** (bets spend spot; moves only the gap from perps):
 
@@ -106,8 +91,8 @@ step waits ~1.5 min: tell your owner BEFORE you run it.
    node "${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market/scripts/ensure_spot.mjs" --amount 20 --idempotency-key pm-spot-1119-1032
    ```
 
-5. [ADAPT] **Find the market and price.** Search 1–2 plain words (all must match);
-   `--venue all` if Outcome's own (`out`, default) has nothing:
+5. [ADAPT] **Find the market and price.** Search 1–2 plain words; `--venue all` if Outcome's
+   own (`out`) has nothing:
 
    ```sh
    node "${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market/scripts/markets.mjs" --venue out --query btc
@@ -122,107 +107,70 @@ step waits ~1.5 min: tell your owner BEFORE you run it.
    node "${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market/scripts/place_bet.mjs" --market 37348 --outcome YES --side buy --size 40 --price 0.47 --idempotency-key pm-bet-1119-1033
    ```
 
-   Fill now: price = best ask (buy) / best bid (sell) plus `--tif FAK`; default GTC rests.
-   Selling needs the shares in `account.mjs`. Report `orderStatus` (`filled` or `resting`).
+   Fill now: best ask (buy) / best bid (sell) plus `--tif FAK`; default GTC rests. Selling
+   needs the shares. Report `orderStatus` (`filled` or `resting`).
 
-7. [FIXED] **Cancel** one order (id from `account.mjs`); `--all` instead cancels every one:
+7. [FIXED] **Cancel** one order (id from `account.mjs`); `--all` cancels every one:
 
    ```sh
    node "${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market/scripts/cancel.mjs" --order-id 123456789 --idempotency-key pm-cxl-1119-1034
    ```
 
-8. [ADAPT] **Account** (positions, orders, fills, settled; read any time): run
-   `.../scripts/account.mjs --days 7` with the full path. Winners redeem automatically.
-   `settled[].yesPayout` is what one YES share paid; NO paid the rest.
+8. [ADAPT] **Account** (positions, orders, fills, settled): `.../scripts/account.mjs --days 7`
+   with the full path. Winners redeem automatically.
 
-9. [FIXED] **Withdraw** (to the SAME wallet on Arbitrum, ≥ 2 USDC, $1 fee; no destination
-   flag). Run status first. Use `--all` for everything:
+9. [FIXED] **Withdraw** (to the SAME wallet on Arbitrum, ≥ 2 USDC, $1 fee). Status first;
+   `--all` for everything:
 
    ```sh
    node "${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market/scripts/withdraw.mjs" --amount 20 --idempotency-key pm-wd-1119-1036
    ```
 
-   `withdraw_pending` → lands in ~5 minutes. `needs_perps` → `ensure_perps.mjs --amount
-   <data.amountUsdc> --idempotency-key pm-perps-…`, then withdraw again. Money in open
-   orders cannot leave: cancel first.
+   `withdraw_pending` → ~5 minutes. `needs_perps` → `ensure_perps.mjs --amount
+   <data.amountUsdc>`, then withdraw again. Cancel open orders first.
 
-10. [FIXED] **Retire the trading key** (after the withdrawal landed, no orders open):
+10. [FIXED] **Retire the trading key** (withdrawal landed, no orders open):
 
     ```sh
     node "${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market/scripts/revoke_agent.mjs" --idempotency-key pm-rev-1119-1040
     ```
 
-    `revoked: true` → deleted and dropped by Hyperliquid; `false` → no key. Its throwaway
-    (`allAgents[].placeholder`) is replaced by the next setup; other names (`ours: false`)
-    are not ours.
-
-### Actions
-
-| Script | Wallet signature |
-| --- | --- |
-| `status`, `markets`, `account` | none (reads) |
-| `setup_agent`, `revoke_agent` | ApproveAgent |
-| `deposit` | Arbitrum USDC transfer |
-| `ensure_spot`, `ensure_perps`, `place_bet`, `cancel` | none: the trading key signs (a lapsed key is repaired in a duty with one ApproveAgent) |
-| `withdraw` | Hyperliquid Withdraw to the same wallet |
-
-All but the reads need `--idempotency-key`. The server decides the card: the main wallet
-always files one, a duty's own live auto-execute wallet none.
+    A throwaway approval stays under our name (`placeholder: true`) until the next setup
+    replaces it; other names (`ours: false`) are not ours.
 
 ### Duty usage
 
-Errand: deposit → key → spot → orders → withdraw → retire. `walletScope: "main"` before the
-first money step: say in the duty's first note that it trades the owner's main wallet. Per tick: status, then place_bet or cancel as instructed. The close sweep runs in the duty's own session BEFORE it is deleted:
-`cancel.mjs --all` → sell open positions at the best bid with `--tif FAK` (no bid: leave
-them to settle) → `ensure_perps.mjs` → `withdraw.mjs --all` → status until the USDC shows
-on Arbitrum → `revoke_agent.mjs`. Deleting the duty then returns the wallet's balance to the
-main wallet.
+File it with its own new wallet; its funding card (USDC on Base) is fine, step 2 deposits
+from any chain. Each tick: status, then place_bet or cancel with the slot key.
+`walletScope: "main"` before the first money step: say in the duty's first note that it
+trades the owner's main wallet.
+Run the close sweep BEFORE the duty is deleted: `references/duty.md`.
 
 ## Idempotency and retries
 
-Money steps REFUSE to run without `--idempotency-key`. Use a new one for every new ask:
-`pm-<step>-<MMDD-HHMM>`; every output echoes it. A
-money step with an unknown outcome (timeout, cut off with no JSON, `ORDER_UNKNOWN`,
-`UNEXPECTED`): do not re-run it with a new key. First read status.mjs, account.mjs.
+Money steps REFUSE to run without `--idempotency-key`; a new one for every new ask
+(`pm-<step>-<MMDD-HHMM>`). A money step with an unknown outcome (timeout, no JSON,
+`ORDER_UNKNOWN`, `UNEXPECTED`): do not re-run it with a new key. First read status.mjs,
+account.mjs; a lost acp deposit: `bevo-read request <key> --route trade`.
 
-- `pending_owner_signature` (deposit, setup_agent, withdraw, revoke_agent): the card is
-  waiting; once your owner says they signed, run exactly `data.resume` (same key,
-  `--resume`). Cut off with no JSON in those four: the same command plus `--resume <key>`.
-- `authorization_timeout`: nothing ran, not resumable. If they still want it, rerun with a
-  NEW key.
+- `pending_owner_signature` (deposit, setup_agent, withdraw, revoke_agent): once your owner
+  signed, run exactly `data.resume`. Cut off with no JSON there: same command plus
+  `--resume <key>`.
+- `authorization_timeout`: nothing ran. If still wanted, a NEW key.
 - The same key never doubles: a re-run bet is `KEY_REUSED`, a re-run cancel `alreadyDone`.
-  Duties pass their slot key.
 - Orders go one at a time.
 
 ## Failure handling
 
-`error.hint` is written for you: follow it unless a row below says more.
-
-| `error.code` | Do |
-| --- | --- |
-| `BAD_ARGS`, `AMOUNT_BELOW_MINIMUM`, `ORDER_BELOW_MINIMUM`, `BAD_PRICE`, `MARKET_ORDER_REFUSED` | fix the flags, never invent any; deposit ≥ 5, withdraw ≥ 2, orders ≥ $2, limit only |
-| `INSUFFICIENT_USDC`, `NEEDS_HEADROOM` | owner sends native USDC (not USDC.e) on Arbitrum, or deposit the hint's smaller amount |
-| `NEEDS_DEPOSIT`, `NEEDS_SPOT` | step 2, step 4 (hint's amount) |
-| `AGENT_INVALID` | step 3 plain, then retry the failed command ONCE with a new key. Never re-approve an old key address |
-| `APPROVE_FAILED` | report `data.raw`; run status; no auto-retry |
-| `AGENT_APPROVAL_UNCONFIRMED`, `AGENT_SETUP_IN_PROGRESS` | wait a minute, run status; if the key shows, rerun step 3 plain |
-| `VAULT_PENDING` | no key here yet: step 3 plain |
-| `VAULT_UNAVAILABLE`, `HL_UNREACHABLE`, `HL_INFO_FAILED` | retry once in a minute, then say so |
-| `VAULT_FULL` | tell your owner the vault is full |
-| `INSUFFICIENT_HL_BALANCE`, `NOTHING_TO_WITHDRAW`, `INSUFFICIENT_BALANCE`, `INSUFFICIENT_SHARES` | use at most the hint's amount, or say it is empty; run status, step 4 or 2 |
-| `WITHDRAW_REFUSED`, `SIGN_TYPE_REFUSED`, `DEPOSIT_TX_FAILED` | nothing left; report the message |
-| `WITHDRAW_ALREADY_SUBMITTED`, `WITHDRAW_UNKNOWN` | sent already, never again; run status. Unknown: same command plus `--resume <key>` |
-| `ORDER_UNKNOWN` | run account.mjs; retry only with the SAME key |
-| `RESUME_NOT_FOUND`, `RESUME_MISMATCH`, `KEY_REUSED` | the step finished, changed or already ran; run status and account first |
-| `OWNER_DECLINED` | nothing ran; retry only on their yes, with a NEW key |
-| `SIGNER_OUTDATED`, `DUTY_DELETED` | the container must be redeployed; the duty is gone, nothing ran. Stop |
-| `EXCHANGE_ERROR`, `UNEXPECTED`, `SIGNER_NOT_CONFIGURED` | report; status and account first |
+Follow `error.hint`. Never: re-approve an old key address, retry a money step with a new key
+after an unknown outcome, or deposit again while one is accepted or `deposit_pending`. `AGENT_INVALID`: step 3,
+then retry ONCE with a new key. `OWNER_DECLINED`: nothing ran. Full table: `references/failures.md`.
 
 ## Limits
 
 - Outcome.xyz / HIP-4 on Hyperliquid mainnet only. Limit orders only, whole shares, $2
-  minimum per order (sells too: a smaller position waits for settlement).
-- Deposit ≥ 5 USDC (native, on Arbitrum). Withdraw ≥ 2 USDC, only to the same wallet ($1
+  minimum per order (sells too).
+- Deposit ≥ 5 USDC (acp: from any chain; fallback: native USDC on Arbitrum). Withdraw ≥ 2 USDC, only to the same wallet ($1
   fee). No account-mode change. A share pays $1 if its side wins, else $0.
 
 ## Say to the owner

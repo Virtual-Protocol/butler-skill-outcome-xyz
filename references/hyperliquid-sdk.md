@@ -30,6 +30,9 @@ Background for answering your owner's questions. The scripts hold every constant
 
 ## Deposit (Arbitrum → Hyperliquid), `deposit.mjs`
 
+The preferred deposit is acp's aggregated move (`--chain-out 1337`, see `deposit.md`), which
+takes USDC from any chain. `deposit.mjs` is the fallback when `acp` is not installed:
+
 | Fact | Value |
 | --- | --- |
 | How | One plain ERC-20 transfer of **native USDC on Arbitrum One** from the main wallet to Hyperliquid's Bridge2 contract (0x2df1…3df7). Hyperliquid credits the **sending** address. |
@@ -41,9 +44,10 @@ Background for answering your owner's questions. The scripts hold every constant
 | Not credited yet | `deposit_pending` with a resume command: run that later. It re-checks under the same key and never sends again. |
 | Bridge status | Hyperliquid marks Bridge2 "legacy" in favour of CCTP, but it still credits deposits. |
 
-If the main wallet has too little USDC on Arbitrum (`INSUFFICIENT_USDC`, or status says
-`arbitrumUsdcEnough: false`), your owner must send native USDC on Arbitrum to `mainWallet`
-first.
+If the wallet has too little USDC on Arbitrum for this fallback (`INSUFFICIENT_USDC`, or
+status says `arbitrumUsdcEnough: false`), deposit with acp's move instead (`deposit.md`): it
+takes USDC from any chain. Only without acp must your owner send native USDC on Arbitrum to
+`mainWallet` first.
 
 ## Withdraw (Hyperliquid → Arbitrum), `withdraw.mjs`
 

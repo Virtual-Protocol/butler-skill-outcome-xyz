@@ -15,6 +15,10 @@ private vault (`references/credentials.md`).
 | `references/outcome-sdk.md` | HIP-4 / Outcome.xyz concepts and which SDK call each script makes |
 | `references/hyperliquid-sdk.md` | Deposit, withdraw, perps vs spot, agent keys, nonces |
 | `references/credentials.md` | The trading key: vault item, bootstrap order, renewal, revoke, recovery |
+| `references/deposit.md` | Moving USDC into Hyperliquid (acp's move first, `deposit.mjs` fallback) and out |
+| `references/duty.md` | Funding a duty wallet, wallet scope, ticks, the close sweep |
+| `references/failures.md` | What to do for every `error.code` |
+| `references/actions.md` | What each script signs, cards, revoke placeholder |
 | `scripts/*.mjs`, `scripts/lib/common.mjs` | The only code that touches the venues; one JSON envelope per run |
 | `package.json`, `package-lock.json` | Pinned `@outcome.xyz/hip4` 1.3.0, `@nktkas/hyperliquid` 0.33.3, `viem`; at the skill root, never under `scripts/` |
 | `dev/` | Local signer for mainnet tests from a Mac (`dev/README.md`); not published |

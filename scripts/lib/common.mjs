@@ -1281,6 +1281,20 @@ export function resolveSideIndex(outcome, sides) {
 // status.mjs decision (pure)
 // ---------------------------------------------------------------------------
 
+export const HL_ACP_CHAIN_ID = 1337;
+
+export function acpDepositCommand(amount) {
+  const usd = decimalString(Math.max(MIN_DEPOSIT_USDC, amount), 2);
+  return `acp trade --token-in usdc --amount-in ${usd} --token-out usdc --chain-out ${HL_ACP_CHAIN_ID} --idempotency-key <new key> --json`;
+}
+
+export function depositShortfallHint(amount) {
+  return (
+    `Deposit with acp instead: \`${acpDepositCommand(amount)}\` pulls USDC from any of this wallet's chains ` +
+    "(never add --recipient). Only without acp: the owner adds native USDC (not USDC.e) on Arbitrum."
+  );
+}
+
 /** Decide the next step from the readings. */
 export function computeNext({ hl, arb, agent, need = MIN_ORDER_NOTIONAL }) {
   const hlTotal = hl.unified ? hl.spotUsdcFree : round6(hl.spotUsdcFree + hl.perpsWithdrawable);
@@ -1293,6 +1307,8 @@ export function computeNext({ hl, arb, agent, need = MIN_ORDER_NOTIONAL }) {
           ? "This wallet has never deposited to Hyperliquid."
           : `Hyperliquid holds $${hlTotal} USDC; $${need} is needed.`,
       suggestedDepositUsdc: shortfall,
+      depositCommand: acpDepositCommand(shortfall),
+      fallback: `No acp: deposit.mjs --amount ${decimalString(shortfall, 2)} (Arbitrum USDC only).`,
       arbitrumUsdcEnough: arb ? arb.usdc >= shortfall : null,
     };
   }

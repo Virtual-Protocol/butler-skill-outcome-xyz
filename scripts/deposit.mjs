@@ -23,6 +23,8 @@ import {
   loadSigner,
   parseUsdAmount,
   assertDepositAmount,
+  acpDepositCommand,
+  depositShortfallHint,
   readArbitrumBalances,
   readHlBalances,
   arbitrumClient,
@@ -88,8 +90,8 @@ runScript(async () => {
     const arb = await readArbitrumBalances(main);
     if (arb.usdcRaw < units) {
       throw new SkillError("INSUFFICIENT_USDC", `Main wallet has ${arb.usdc} USDC on Arbitrum; ${amount} needed.`, {
-        hint: "Fund the main wallet with native USDC on Arbitrum (not USDC.e).",
-        data: { arbitrumUsdc: arb.usdc },
+        hint: depositShortfallHint(amount),
+        data: { arbitrumUsdc: arb.usdc, depositCommand: acpDepositCommand(amount) },
       });
     }
     if (signerMod.isDev) {
@@ -109,8 +111,8 @@ runScript(async () => {
         "NEEDS_HEADROOM",
         `Main wallet has ${arb.usdc} USDC on Arbitrum; depositing ${amount} needs ${amount + DEPOSIT_USDC_HEADROOM} (gas is paid in USDC).`,
         {
-          hint: `Deposit at most ${Math.floor((arb.usdc - DEPOSIT_USDC_HEADROOM) * 100) / 100} USDC (minimum 5), or ask the owner to add USDC on Arbitrum.`,
-          data: { arbitrumUsdc: arb.usdc, headroom: DEPOSIT_USDC_HEADROOM },
+          hint: `${depositShortfallHint(amount)} Or deposit at most ${Math.floor((arb.usdc - DEPOSIT_USDC_HEADROOM) * 100) / 100} USDC here (minimum 5).`,
+          data: { arbitrumUsdc: arb.usdc, headroom: DEPOSIT_USDC_HEADROOM, depositCommand: acpDepositCommand(amount) },
         },
       );
     }

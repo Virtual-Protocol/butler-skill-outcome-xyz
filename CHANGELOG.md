@@ -37,6 +37,16 @@ older container stops with `SIGNER_OUTDATED` and must be redeployed first.
 - `status.mjs` marks each `allAgents` entry `ours` (this skill's agent name) and `placeholder`
   (ours while no key is stored: the throwaway a revoke left until the next setup replaces it).
   Duties report a `walletScope: "main"` run in their first note.
+- Deposits go through acp's aggregated move into Hyperliquid
+  (`acp trade --token-in usdc --amount-in <usd> --token-out usdc --chain-out 1337`), which takes
+  USDC from any of the wallet's chains into the signing wallet's own Hyperliquid account.
+  `deposit.mjs` (Arbitrum USDC → Bridge2) is the fallback when `acp` is not installed; its
+  shortfall hints and `status.mjs`'s `next.depositCommand` name the acp command first. The 5 USDC
+  floor holds for both. A duty's built-in funding card (USDC on Base) is enough. `acp` joins
+  `requires.bins`.
+- SKILL.md body cut to under 9,000 characters: the duty procedure, the failure table and the
+  per-script signing table moved to `references/duty.md`, `failures.md`, `actions.md`;
+  `references/deposit.md` is new.
 - `cancel.mjs` is idempotent: an order already cancelled or filled is `done` with
   `alreadyDone: true` instead of `ORDER_NOT_FOUND`.
 - Dev signer: `DEV_AGENT_NAME` defaults to `bevo` everywhere (the scripts said `bevo-dev`
