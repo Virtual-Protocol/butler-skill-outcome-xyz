@@ -64,10 +64,10 @@ withdrawal landed, never with orders open (they would be uncancellable by this s
 | --- | --- |
 | No key (first use, or revoked) | `setup_agent.mjs` makes one. |
 | Key not listed on Hyperliquid | `setup_agent.mjs` replaces it; in a duty a trading script does it by itself. |
-| Vault waiting for the phone (`VAULT_PENDING`) | The vault has not been restored on this Butler yet. In a duty: skip the run. In chat: ask the owner to open Virtuals once. If they want to go on now, `setup_agent.mjs --rotate` makes a new key in a fresh vault (an older key restored later is caught by the Hyperliquid check). |
+| Vault not restored on this Butler yet (`vaultState: "pending"`) | No key is available here, so it is the same as no key: never wait for the phone. `status.mjs` says `needs_agent`; `setup_agent.mjs` saves a fresh key (saves work while the vault is pending) and approves it under the same name, which replaces any older agent on Hyperliquid; in a duty a trading script does it by itself. When the phone restores later, the fresh save stays on top; an older key it brings back fails the Hyperliquid check and is replaced. |
 | Vault volume lost | Same as no key: the old address stays approved until it expires or is replaced; `setup_agent.mjs` approves a new one. |
 | Phone restores an old copy that holds a replaced key | The Hyperliquid check marks it invalid; the next setup replaces it. |
-| Owner without a phone (web only) | The vault is restored from the web session; if it stays pending, use `setup_agent.mjs --rotate`. |
+| Owner without a phone (web only) | The vault is restored from the web session; while it is pending, `setup_agent.mjs` makes a fresh key as above. |
 | `VAULT_FULL` | The owner's vault has no room; nothing was stored. Tell the owner. |
 | `SIGNER_OUTDATED` | The container runs a build without the vault signer; it must be redeployed. |
 

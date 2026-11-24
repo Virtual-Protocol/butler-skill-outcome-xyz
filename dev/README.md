@@ -27,6 +27,7 @@ export BEVO_SIGNER=$PWD/dev/local-signer.mjs
 | `DEV_MAIN_PRIVATE_KEY` | optional; only `deposit.mjs` and `setup_agent.mjs` need it. Without it they stop with `MAIN_SIGNER_UNAVAILABLE` |
 | `DEV_AGENT_NAME` | HL agent name for a seeded key and for a NEW key `setup_agent.mjs` approves (default `bevo`, the dev agent already approved on the test wallet; it uses all 3 named slots, so the default replaces the dev agent, never `Butler`) |
 | `DEV_SIGNER_VAULT`, `DEV_SIGNER_KEY_FILE`, `DEV_SIGNER_LEDGER` | path overrides for the vault, the old key file and the ledger (tests) |
+| `DEV_SIGNER_VAULT_STATE` | `pending` emulates a Butler vault not yet restored from the phone (`missing`/`unrestored`): a get of an absent item answers `pending`, saves still work, `agentKey` treats pending as no key (`create: false` → `null`, create/rotate save a fresh one) and nothing is seeded |
 | `ARBITRUM_RPC_URL` | default `https://arb1.arbitrum.io/rpc` |
 
 Never echo these variables.

@@ -15,6 +15,7 @@ import {
   parseArgs,
   okEnvelope,
   loadSigner,
+  readStoredAgent,
   viemAccounts,
   agentNameFor,
   waitUntilGone,
@@ -26,7 +27,6 @@ import {
   rethrowWithResume,
   SkillError,
   RESUME_FLAGS,
-  AGENT_KEY_LABEL,
 } from "./lib/common.mjs";
 
 const SCRIPT = "revoke_agent";
@@ -44,8 +44,8 @@ runScript(async () => {
     rec = loadPending(key, SCRIPT);
   } else {
     const accounts = await viemAccounts();
-    const agent = await signerMod.agentKey({ label: AGENT_KEY_LABEL, accounts, create: false, deadline: scriptDeadline() });
-    if (!agent) return okEnvelope("done", { revoked: false, reason: "no key", mainWallet: main });
+    const { agent, vaultState } = await readStoredAgent(signerMod);
+    if (!agent) return okEnvelope("done", { revoked: false, reason: "no key", mainWallet: main, ...(vaultState ? { vaultState } : {}) });
     const agentName = agent.agentName ?? agentNameFor(signerMod);
     const oldAgentAddress = agent.address;
     await agent.forget();

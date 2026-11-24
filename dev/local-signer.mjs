@@ -253,10 +253,13 @@ function assertVenueName(name) {
   }
 }
 
+const vaultPending = () => process.env.DEV_SIGNER_VAULT_STATE === "pending";
+const presentOrAbsent = (got) => (got.status === "pending" ? { status: "not_found" } : got);
+
 export async function getSecret(name) {
   assertVenueName(name);
   const item = readVault().items[name];
-  if (!item) return { status: "not_found" };
+  if (!item) return { status: vaultPending() ? "pending" : "not_found" };
   return { status: "ok", value: item.value, label: item.label, kind: item.kind, updatedAt: item.updatedAt, etag: etagOf(item) };
 }
 
@@ -289,7 +292,7 @@ export async function deleteSecret(name) {
 
 export async function updateSecret(name, fn, { label, kind, tries = 3 } = {}) {
   for (let attempt = 0; attempt < tries; attempt++) {
-    const prev = await getSecret(name);
+    const prev = presentOrAbsent(await getSecret(name));
     const next = await fn(prev.status === "ok" ? prev.value : null);
     if (next === undefined) return { status: "unchanged", value: prev.status === "ok" ? prev.value : null };
     if (next === null) {
@@ -416,9 +419,9 @@ export async function agentKey({ label = "outcome", accounts, rotate = false, cr
   const name = venueCredentialName(label, main);
   if (!name) throw signerError("invalid", `"${label}" is not a valid vault label.`);
   const displayName = display ?? `${label} · ${shortWallet(main)}`;
-  await seedOnce(name, main, label, displayName);
+  if (!vaultPending()) await seedOnce(name, main, label, displayName);
 
-  let got = await getSecret(name);
+  let got = presentOrAbsent(await getSecret(name));
   for (let attempt = 0; attempt < 3; attempt++) {
     const parsed = parseValue(got);
     const existing = storedKey(parsed);
@@ -443,7 +446,7 @@ export async function agentKey({ label = "outcome", accounts, rotate = false, cr
       return keyObject({ name, label, main, accounts, stored: fresh, generated: true });
     } catch (err) {
       if (err?.code !== "conflict") throw err;
-      got = await getSecret(name);
+      got = presentOrAbsent(await getSecret(name));
       const winner = storedKey(parseValue(got));
       if (winner && winner.address !== existing?.address) {
         return keyObject({ name, label, main, accounts, stored: winner, generated: false });

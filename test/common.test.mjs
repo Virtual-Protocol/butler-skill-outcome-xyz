@@ -54,6 +54,7 @@ import {
   BUDGET_MARGIN_MS,
   ensureAgent,
   bootstrapAgent,
+  readStoredAgent,
   orderCloid,
   outcomeOrderWire,
   placeOutcomeOrder,
@@ -473,9 +474,14 @@ test("computeNext decisions", () => {
   assert.equal(computeNext({ hl: hl({ role: "missing" }), agent: ok }).status, "needs_deposit");
   assert.equal(computeNext({ hl: hl({ spotUsdcFree: 1 }), agent: ok }).status, "needs_deposit");
   assert.equal(computeNext({ hl: hl({ spotUsdcFree: 5 }), agent: { valid: false, everCreated: true } }).status, "needs_agent");
-  const pending = computeNext({ hl: hl({ spotUsdcFree: 5 }), agent: { valid: false, vaultCode: "VAULT_PENDING", reason: "waiting" } });
-  assert.equal(pending.code, "VAULT_PENDING");
+  const pending = computeNext({ hl: hl({ spotUsdcFree: 5 }), agent: { valid: false, everCreated: false, vaultState: "pending" } });
+  assert.equal(pending.status, "needs_agent");
+  assert.equal(pending.code, "AGENT_INVALID");
+  assert.equal(pending.vaultState, "pending");
+  assert.match(pending.reason, /setup_agent\.mjs/);
   assert.equal(pending.rotate, false);
+  const down = computeNext({ hl: hl({ spotUsdcFree: 5 }), agent: { valid: false, vaultCode: "VAULT_UNAVAILABLE", reason: "down" } });
+  assert.equal(down.code, "VAULT_UNAVAILABLE");
   assert.equal(computeNext({ hl: hl({ perpsWithdrawable: 5 }), agent: ok }).status, "needs_spot");
   assert.equal(computeNext({ hl: hl({ unified: true, spotUsdcFree: 5 }), agent: ok }).status, "ready");
   assert.equal(computeNext({ hl: hl({ unified: true, spotUsdcFree: 5 }), agent: { valid: true, code: "AGENT_EXPIRING", daysLeft: 10, mustRotate: false } }).status, "ready");
@@ -654,7 +660,7 @@ function fakeKey(address, o = {}) {
   };
 }
 
-function fakeSignerMod({ stored = null, onFresh, throws = null }) {
+function fakeSignerMod({ stored = null, onFresh, throws = null, readThrows = null }) {
   const calls = [];
   return {
     calls,
@@ -662,6 +668,7 @@ function fakeSignerMod({ stored = null, onFresh, throws = null }) {
     agentKey: async (opts) => {
       calls.push(opts);
       if (throws) throw throws;
+      if (readThrows && opts.create === false) throw readThrows;
       if (opts.create === false) return stored;
       return onFresh(opts);
     },
@@ -737,13 +744,54 @@ test("ensureAgent: an unlisted key with approval card asks the owner to run setu
   }
 });
 
-test("ensureAgent: a vault waiting for the phone surfaces as VAULT_PENDING", async () => {
-  const err = Object.assign(new Error("vault is waiting for the phone"), { code: "vault_pending" });
-  const mod = fakeSignerMod({ throws: err });
-  await assert.rejects(ensureAgent({ signerMod: mod, signer: mainSignerFake("auto") }), (e) => e.code === "vault_pending");
-  const env = envelopeFromError(err);
+const vaultPendingErr = () => Object.assign(new Error("the vault is waiting to be restored from the owner's phone"), { code: "vault_pending" });
+
+test("readStoredAgent: a pending vault is no key here, other vault errors still throw", async () => {
+  const pending = await readStoredAgent(fakeSignerMod({ readThrows: vaultPendingErr() }));
+  assert.deepEqual(pending, { agent: null, vaultState: "pending" });
+  const none = await readStoredAgent(fakeSignerMod({ stored: null }));
+  assert.deepEqual(none, { agent: null, vaultState: null });
+  const down = Object.assign(new Error("unreachable"), { code: "vault_unavailable" });
+  await assert.rejects(readStoredAgent(fakeSignerMod({ readThrows: down })), (e) => e.code === "vault_unavailable");
+});
+
+for (const [label, opts] of [
+  ["a pending read that throws", { readThrows: vaultPendingErr() }],
+  ["a pending read answered null", { stored: null }],
+]) {
+  test(`ensureAgent: ${label} with approval auto bootstraps a fresh key`, async () => {
+    const hl = hlStub();
+    try {
+      const fresh = fakeKey(NEW_AGENT, { generated: true });
+      const mod = fakeSignerMod({ ...opts, onFresh: () => fresh });
+      const signed = [];
+      const { agent, health } = await ensureAgent({ signerMod: mod, signer: mainSignerFake("auto", signed) });
+      assert.equal(agent, fresh);
+      assert.equal(health.code, "AGENT_OK");
+      assert.equal(signed.length, 1);
+      assert.equal(mod.calls[1].create, true);
+      assert.equal(mod.calls[1].rotate, true);
+      assert.equal(fresh.calls.markApproved.length, 1);
+    } finally {
+      hl.restore();
+    }
+  });
+}
+
+test("ensureAgent: a pending vault with approval card points to setup_agent, never to waiting", async () => {
+  const mod = fakeSignerMod({ readThrows: vaultPendingErr(), onFresh: () => assert.fail("must not make a key") });
+  await assert.rejects(ensureAgent({ signerMod: mod, signer: mainSignerFake("card") }), (e) => {
+    assert.equal(e.code, "AGENT_INVALID");
+    assert.equal(e.status, "needs_agent");
+    assert.match(e.hint, /setup_agent\.mjs/);
+    assert.equal(e.data.vaultState, "pending");
+    assert.doesNotMatch(e.message, /phone to sync|open Virtuals/);
+    return true;
+  });
+  assert.equal(mod.calls.length, 1);
+  const env = envelopeFromError(vaultPendingErr());
   assert.equal(env.error.code, "VAULT_PENDING");
-  assert.match(env.error.hint, /Virtuals/);
+  assert.match(env.error.hint, /setup_agent\.mjs/);
 });
 
 test("bootstrapAgent: the loser of a key race waits for the winner's key and signs nothing", async () => {

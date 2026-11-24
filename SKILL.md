@@ -43,8 +43,8 @@ never withdraw.
 - **Checked against Hyperliquid before every use.** Approvals lapse after ~90 days: renew
   under 7 days left (step 3 `--rotate`, on your owner's yes). No key or an invalid one:
   `setup_agent.mjs`; a trading script in a duty repairs it by itself.
-- **Retire:** `revoke_agent.mjs`. **`VAULT_PENDING`** (vault waiting for the phone): in a
-  duty skip this run; in chat ask your owner to open Virtuals.
+- **Retire:** `revoke_agent.mjs`. A vault not restored yet (`vaultState: "pending"`) means
+  no key here: `setup_agent.mjs` makes a fresh one.
 
 Depth: `references/credentials.md`, `hyperliquid-sdk.md`, `commands.md`.
 
@@ -74,7 +74,7 @@ step waits ~1.5 min: tell your owner BEFORE you run it.
    | `next.status` | Do |
    | --- | --- |
    | `needs_deposit` | step 2 with at least `next.suggestedDepositUsdc`; `arbitrumUsdcEnough: false` → ask your owner to send native USDC on Arbitrum to `mainWallet` |
-   | `needs_agent` | `VAULT_PENDING` / `VAULT_UNAVAILABLE`: see Credentials; else step 3 (`--rotate` only for `AGENT_EXPIRING`) |
+   | `needs_agent` | `VAULT_UNAVAILABLE`: retry in a minute; else step 3 (`--rotate` only for `AGENT_EXPIRING`) |
    | `needs_spot` | step 4 with `next.suggestedSpotAmount` |
    | `ready` | step 5; if `next.code` is `AGENT_EXPIRING`, first tell your owner the key expires in `agent.daysLeft` days and ask to renew (step 3 `--rotate`) |
 
@@ -169,7 +169,7 @@ always files one, a duty's own live auto-execute wallet none.
 
 ### Duty usage
 
-Errand: deposit → key → spot → orders → withdraw → retire. Per tick: status, then place_bet or cancel as instructed; skip a `VAULT_PENDING` tick. The close sweep runs in the duty's own session BEFORE it is deleted:
+Errand: deposit → key → spot → orders → withdraw → retire. Per tick: status, then place_bet or cancel as instructed. The close sweep runs in the duty's own session BEFORE it is deleted:
 `cancel.mjs --all` → sell open positions at the best bid with `--tif FAK` (no bid: leave
 them to settle) → `ensure_perps.mjs` → `withdraw.mjs --all` → status until the USDC shows
 on Arbitrum → `revoke_agent.mjs`. Deleting the duty then returns the wallet's balance to the
@@ -203,7 +203,7 @@ money step with an unknown outcome (timeout, cut off with no JSON, `ORDER_UNKNOW
 | `AGENT_INVALID` | step 3 plain, then retry the failed command ONCE with a new key. Never re-approve an old key address |
 | `APPROVE_FAILED` | report `data.raw`; run status; no auto-retry |
 | `AGENT_APPROVAL_UNCONFIRMED`, `AGENT_SETUP_IN_PROGRESS` | wait a minute, run status; if the key shows, rerun step 3 plain |
-| `VAULT_PENDING` | duty: skip this run. Chat: ask your owner to open Virtuals, or step 3 `--rotate` to go on now |
+| `VAULT_PENDING` | no key here yet: step 3 plain |
 | `VAULT_UNAVAILABLE`, `HL_UNREACHABLE`, `HL_INFO_FAILED` | retry once in a minute, then say so |
 | `VAULT_FULL` | tell your owner the vault is full |
 | `INSUFFICIENT_HL_BALANCE`, `NOTHING_TO_WITHDRAW`, `INSUFFICIENT_BALANCE`, `INSUFFICIENT_SHARES` | use at most the hint's amount, or say it is empty; run status, step 4 or 2 |
@@ -231,7 +231,6 @@ Use your owner's language.
 - Key expiring: "Your trading permission expires in 5 days. Renew now? It's one signature."
 - Withdrawal: "Withdraw 20 USDC to your wallet on Arbitrum? After the $1 fee, 19 USDC
   arrives in ~5 minutes."
-- Vault waiting: "Open the Virtuals app once so I can reach my trading key."
 
 ### Security
 

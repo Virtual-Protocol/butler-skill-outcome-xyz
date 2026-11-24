@@ -114,6 +114,27 @@ test("get-or-generate: one venue_credentials item, then the same key; vault file
   });
 });
 
+test("DEV_SIGNER_VAULT_STATE=pending: an absent item reads pending, agentKey treats it as no key, saves work, nothing is seeded", async () => {
+  const prev = process.env.DEV_SIGNER_VAULT_STATE;
+  process.env.DEV_SIGNER_VAULT_STATE = "pending";
+  try {
+    await withWallet(async (_address, name) => {
+      assert.deepEqual(await signer.getSecret(name), { status: "pending" });
+      assert.equal(await signer.agentKey({ accounts, create: false }), null);
+      assert.deepEqual(await common.readStoredAgent(signer), { agent: null, vaultState: null });
+      const fresh = await signer.agentKey({ accounts, rotate: true, agentName: "bevo" });
+      assert.equal(fresh.generated, true);
+      assert.equal((await signer.getSecret(name)).status, "ok");
+      await fresh.markApproved({ validUntil: "2027-01-01T00:00:00.000Z" });
+      assert.ok(JSON.parse(storedItem(name).value).agent_key.approvedAt);
+      assert.equal((await signer.agentKey({ accounts, create: false })).address, fresh.address);
+    }, { agentEnv: generatePrivateKey() });
+  } finally {
+    if (prev === undefined) delete process.env.DEV_SIGNER_VAULT_STATE;
+    else process.env.DEV_SIGNER_VAULT_STATE = prev;
+  }
+});
+
 test("rotate writes a new key and reports it generated", async () => {
   await withWallet(async () => {
     const first = await signer.agentKey({ accounts });

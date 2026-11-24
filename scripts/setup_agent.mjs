@@ -17,7 +17,7 @@ import {
   parseArgs,
   okEnvelope,
   loadSigner,
-  viemAccounts,
+  readStoredAgent,
   agentHealth,
   recordApproval,
   bootstrapAgent,
@@ -27,7 +27,6 @@ import {
   loadPending,
   SkillError,
   RESUME_FLAGS,
-  AGENT_KEY_LABEL,
 } from "./lib/common.mjs";
 
 const SCRIPT = "setup_agent";
@@ -52,12 +51,7 @@ runScript(async () => {
   if (args.resume) {
     rec = loadPending(key, SCRIPT);
   } else if (!args.rotate) {
-    const stored = await signerMod.agentKey({
-      label: AGENT_KEY_LABEL,
-      accounts: await viemAccounts(),
-      create: false,
-      deadline: scriptDeadline(),
-    });
+    const { agent: stored } = await readStoredAgent(signerMod);
     if (stored) {
       const before = await agentHealth(main, stored.address);
       if (before.valid) {

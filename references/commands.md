@@ -50,9 +50,12 @@ any wallet with no signer and skips the trading-key check.
 - `mainWallet`: the account's address (the owner's Butler wallet or the duty's wallet).
 - `walletScope`: `duty` or `main`, which wallet the server picked (also on `account.mjs`).
 - `agent`: this skill's trading key: `address`, `code` (`AGENT_OK`, `AGENT_EXPIRING`,
-  `AGENT_INVALID`, or `VAULT_PENDING` / `VAULT_UNAVAILABLE` when the vault cannot be read), `valid`, `reason`, `name`, `validUntilIso`, `daysLeft`,
+  `AGENT_INVALID`, or `VAULT_UNAVAILABLE` when the vault cannot be read), `valid`, `reason`, `name`, `validUntilIso`, `daysLeft`,
   `expiringSoon` (< 14 days), `mustRotate` (< 7 days), `everCreated` (a key was ever
-  stored), `roleSeen`/`roleUser` (Hyperliquid's view of the key). `null` with `--address`.
+  stored), `roleSeen`/`roleUser` (Hyperliquid's view of the key), `vaultState` (`"pending"`
+  when the vault is not restored on this Butler yet: no key here, so `needs_agent` with
+  `AGENT_INVALID` and `next.vaultState`; run `setup_agent.mjs`, never wait). `null` with
+  `--address`.
 - `allAgents`: every agent the wallet has approved on Hyperliquid (max 3 named).
 - `hyperliquid`: `role` (`missing` = never deposited), `abstraction`, `unified`,
   `spotUsdcFree`, `spotUsdcHold` (locked in open orders), `perpsWithdrawable`,
@@ -136,7 +139,7 @@ call and never sends a second transfer.
   Hyperliquid to list the key; otherwise `AGENT_APPROVAL_UNCONFIRMED`.
 - `done`: `agentAddress`, `agentName`, `validUntilIso`, `daysLeft`, `generated` (this run made the key; false on `--resume`), `resumed`.
 - Errors: `NEEDS_DEPOSIT`, `APPROVE_FAILED` (`data.raw` is Hyperliquid's text),
-  `AGENT_APPROVAL_UNCONFIRMED`, `AGENT_SETUP_IN_PROGRESS`, `VAULT_PENDING`, `VAULT_UNAVAILABLE`,
+  `AGENT_APPROVAL_UNCONFIRMED`, `AGENT_SETUP_IN_PROGRESS`, `VAULT_UNAVAILABLE`,
   `VAULT_FULL`, `RESUME_NOT_FOUND`, `RESUME_MISMATCH` (the key changed since; status `needs_agent`).
 
 ### revoke_agent.mjs (wallet signature, like setup_agent.mjs)
@@ -145,13 +148,14 @@ call and never sends a second transfer.
 
 Deletes the stored key from the vault, then approves a throwaway address under the same agent
 name so Hyperliquid drops the old key, and waits until the old address is gone from
-`extraAgents`. No stored key → `done` with `revoked: false`. The step is saved before signing
+`extraAgents`. No stored key → `done` with `revoked: false` (plus `vaultState: "pending"`
+when the vault is not restored here). The step is saved before signing
 (the key is already gone from the vault by then): `--resume <key>` finishes it.
 
 - `done`: `revoked`, `goneFromHyperliquid`, `oldAgentAddress`, `agentName`, `resumed`.
 - `pending_owner_signature`: the card is waiting; `data.resume` finishes it.
 - Errors: `APPROVE_FAILED` (the key is already gone from the vault; run status),
-  `VAULT_PENDING`, `RESUME_NOT_FOUND`.
+  `VAULT_UNAVAILABLE`, `RESUME_NOT_FOUND`.
 
 ### ensure_spot.mjs (trading key, no wallet signature)
 

@@ -17,8 +17,13 @@ older container stops with `SIGNER_OUTDATED` and must be redeployed first.
   settle on the first one's key (`AGENT_SETUP_IN_PROGRESS` while it is not listed yet).
 - New `revoke_agent.mjs`: deletes the vault item, then approves a throwaway address under the same
   agent name so Hyperliquid drops the old key (Hyperliquid has no agent delete). Resumable.
-- `status.mjs` reports a vault that is waiting for the owner's phone or unreachable as
-  `VAULT_PENDING` / `VAULT_UNAVAILABLE` in `data.agent.code` and `data.next.code`.
+- A vault not yet restored on this Butler (`pending`) means "no key here", never "wait":
+  `status.mjs` answers `needs_agent` (`AGENT_INVALID`, `vaultState: "pending"`), `setup_agent.mjs`
+  and `ensureAgent` treat it as a missing key and make a fresh one (a hands-free run does it by
+  itself; a card run points to `setup_agent.mjs`). A brand-new user's empty vault no longer
+  deadlocks. Needs the signer that saves while pending; a `vault_pending` throw on a read is
+  still taken as no key. `VAULT_UNAVAILABLE` is reported in `data.agent.code` and
+  `data.next.code`. Dev signer: `DEV_SIGNER_VAULT_STATE=pending` emulates it.
 - New codes `VAULT_PENDING`, `VAULT_UNAVAILABLE`, `VAULT_FULL`, `AGENT_SETUP_IN_PROGRESS`.
 - Trading-key steps no longer file an authorization card.
 - Order idempotency now comes from Hyperliquid: `place_bet.mjs` gives every order a client

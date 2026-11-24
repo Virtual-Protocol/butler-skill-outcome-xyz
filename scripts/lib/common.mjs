@@ -186,7 +186,7 @@ const SIGNER_CODE_ALIASES = {
 
 const SIGNER_CODE_HINTS = {
   VAULT_PENDING:
-    "The Butler's vault is waiting for the owner's phone to sync. In a duty, skip this run. In chat, ask the owner to open Virtuals, or run setup_agent.mjs --rotate if they want to go on now.",
+    "No trading key is available here yet (the vault has not been restored). Run setup_agent.mjs: it makes a fresh key with one wallet signature.",
   VAULT_UNAVAILABLE: "The Butler's vault could not be reached. Retry once in a minute, then tell the owner.",
   VAULT_FULL: "The Butler's vault is full. Tell the owner; nothing was stored.",
   AGENT_SETUP_IN_PROGRESS: "Another run is setting up the trading key. Run status.mjs in a minute.",
@@ -1116,15 +1116,30 @@ export async function bootstrapAgent({ signerMod, signer, signByDutyWallet, key 
  * Hyperliquid before use. A key the venue no longer approves is replaced when the signer
  * says this run signs hands-free (`approval: "auto"`), else the owner is told to run setup.
  */
+export function isVaultPending(err) {
+  return typeof err?.code === "string" && normalizeCode(err.code) === "VAULT_PENDING";
+}
+
+export async function readStoredAgent(signerMod, { signByDutyWallet } = {}) {
+  try {
+    const agent = await signerMod.agentKey({
+      label: AGENT_KEY_LABEL,
+      accounts: await viemAccounts(),
+      signByDutyWallet,
+      create: false,
+      deadline: scriptDeadline(),
+    });
+    return { agent: agent ?? null, vaultState: null };
+  } catch (err) {
+    if (isVaultPending(err)) return { agent: null, vaultState: "pending" };
+    throw err;
+  }
+}
+
 export async function ensureAgent({ signerMod, signer, signByDutyWallet }) {
-  const agent = await signerMod.agentKey({
-    label: AGENT_KEY_LABEL,
-    accounts: await viemAccounts(),
-    signByDutyWallet,
-    create: false,
-    deadline: scriptDeadline(),
-  });
+  const { agent, vaultState } = await readStoredAgent(signerMod, { signByDutyWallet });
   const health = await agentHealth(signer.address, agent?.address ?? null);
+  if (vaultState) health.reason = PENDING_VAULT_REASON;
   if (health.valid) {
     await recordApproval(agent, health);
     return { agent, health };
@@ -1137,9 +1152,11 @@ export async function ensureAgent({ signerMod, signer, signByDutyWallet }) {
   throw new SkillError("AGENT_INVALID", `The trading key cannot be used: ${health.reason}`, {
     hint: "Run setup_agent.mjs (one card), then retry once.",
     status: "needs_agent",
-    data: { agentAddress: health.address ?? null },
+    data: { agentAddress: health.address ?? null, vaultState },
   });
 }
+
+const PENDING_VAULT_REASON = "No trading key is available here yet (the vault has not been restored).";
 
 // ---------------------------------------------------------------------------
 // Hyperliquid info + Arbitrum reads
@@ -1277,10 +1294,13 @@ export function computeNext({ hl, arb, agent, need = MIN_ORDER_NOTIONAL }) {
       code: agent.vaultCode ?? "AGENT_INVALID",
       reason: agent.vaultCode
         ? agent.reason
-        : agent.everCreated
+        : agent.vaultState === "pending"
+          ? `${PENDING_VAULT_REASON} Run setup_agent.mjs to make a fresh one.`
+          : agent.everCreated
           ? "The stored trading key is not approved on Hyperliquid (replaced, pruned or never completed)."
           : "No trading key yet.",
       rotate: false,
+      ...(agent.vaultState ? { vaultState: agent.vaultState } : {}),
     };
   }
   if (!hl.unified && hl.spotUsdcFree < need) {
