@@ -7,7 +7,9 @@
 // status: done | needs_agent | authorization_timeout   (not resumable)
 
 import {
-  assertKeyFresh,
+  classifyCancelStatuses,
+  isLiveOrderStatus,
+  venueOrderStatus,
   runScript,
   parseArgs,
   okEnvelope,
@@ -35,7 +37,6 @@ runScript(async () => {
     if (args.market && !/^\d+$/.test(args.market)) throw new SkillError("BAD_ARGS", "--market must be numeric");
     const signerMod = await loadSigner();
     const idempotencyKey = idempotencyKeyFrom(args, "cancel", { isDev: Boolean(signerMod.isDev) });
-    await assertKeyFresh(signerMod, idempotencyKey, { route: "agent_key" });
     const signer = await signerMod.mainSigner({ idempotencyKey, deadline: scriptDeadline() });
     const main = signer.address;
 
@@ -49,9 +50,14 @@ runScript(async () => {
 
       const targets = args.all ? open : open.filter((o) => String(o.oid) === args["order-id"]);
       if (targets.length === 0) {
-        if (args.all) return okEnvelope("done", { cancelled: [], note: "No open outcome orders." });
-        throw new SkillError("ORDER_NOT_FOUND", `Order ${args["order-id"]} is not open (filled, cancelled, or another market).`, {
+        if (args.all) return okEnvelope("done", { cancelled: [], failed: [], alreadyDone: false, note: "No open outcome orders." });
+        const venueStatus = await venueOrderStatus(main, Number(args["order-id"]));
+        if (venueStatus && !isLiveOrderStatus(venueStatus)) {
+          return okEnvelope("done", { cancelled: [], failed: [], alreadyDone: true, orderId: args["order-id"], venueStatus });
+        }
+        throw new SkillError("ORDER_NOT_FOUND", `Order ${args["order-id"]} is not open (unknown, or in another market).`, {
           hint: "Check account.mjs.",
+          data: { orderId: args["order-id"], venueStatus },
         });
       }
 
@@ -71,17 +77,14 @@ runScript(async () => {
       if (res.status !== "ok") {
         throw exchangeSkillError(typeof res.response === "string" ? res.response : JSON.stringify(res.response ?? null));
       }
-      const statuses = res.response?.data?.statuses ?? [];
-      const results = targets.map((o, i) => ({
-        orderId: String(o.oid),
-        marketId: o.marketId,
-        coin: o.coin,
-        ok: statuses[i] === "success",
-        error: statuses[i] === "success" ? null : statuses[i]?.error ?? "no status returned",
-      }));
-      const failed = results.filter((r) => !r.ok);
+      const { results, cancelled, alreadyDone, failed } = classifyCancelStatuses(targets, res.response?.data?.statuses ?? []);
       if (failed.length === results.length) throw exchangeSkillError(failed[0].error, { results });
-      return okEnvelope("done", { cancelled: results.filter((r) => r.ok), failed });
+      return okEnvelope("done", {
+        cancelled,
+        failed,
+        alreadyDone: cancelled.length === 0 && alreadyDone.length > 0,
+        ...(alreadyDone.length ? { alreadyDoneOrders: alreadyDone } : {}),
+      });
     } finally {
       hip4.destroy();
     }

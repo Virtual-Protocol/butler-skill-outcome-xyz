@@ -54,6 +54,13 @@ import {
   BUDGET_MARGIN_MS,
   ensureAgent,
   bootstrapAgent,
+  orderCloid,
+  outcomeOrderWire,
+  placeOutcomeOrder,
+  assertCloidFresh,
+  orderSubmitFailure,
+  classifyCancelStatuses,
+  isDuplicateCloidError,
 } from "../scripts/lib/common.mjs";
 import { mkdtempSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -486,7 +493,7 @@ test("decimalString / ceilCents / agentNameFor", () => {
   assert.equal(agentNameFor({ isDev: false }), "Butler");
   const prev = process.env.DEV_AGENT_NAME;
   delete process.env.DEV_AGENT_NAME;
-  assert.equal(agentNameFor({ isDev: true }), "bevo-dev");
+  assert.equal(agentNameFor({ isDev: true }), "bevo");
   if (prev !== undefined) process.env.DEV_AGENT_NAME = prev;
 });
 
@@ -593,9 +600,9 @@ test("withdrawLedgerHit also matches Hyperliquid's microsecond nonce", () => {
 test("assertKeyFresh: a key the ledger holds is KEY_REUSED before any other check", async () => {
   const asked = [];
   const signer = (state) => ({ keyStatus: async (key, opts) => (asked.push([key, opts.route]), { state }) });
-  await assertKeyFresh(signer("not_found"), "bet-1", { route: "agent_key" });
-  assert.deepEqual(asked, [["bet-1:1", "agent_key"]]);
-  await assert.rejects(assertKeyFresh(signer("executed"), "bet-1", { route: "agent_key" }), (e) => e.code === "KEY_REUSED");
+  await assertKeyFresh(signer("not_found"), "dep-1");
+  assert.deepEqual(asked, [["dep-1:1", "execute"]]);
+  await assert.rejects(assertKeyFresh(signer("executed"), "dep-1"), (e) => e.code === "KEY_REUSED");
   await assert.rejects(assertKeyFresh(signer("manual"), "dep-1", { resumeHint: "resume it" }), (e) => e.hint === "resume it");
   await assertKeyFresh({}, "bet-1");
   await assertKeyFresh({ keyStatus: async () => null }, "bet-1");
@@ -764,4 +771,119 @@ test("bootstrapAgent: a resume of another key is RESUME_MISMATCH", async () => {
   );
   assert.equal(mod.calls[0].create, false);
   assert.equal(mod.calls[0].rotate, false);
+});
+
+test("orderCloid: deterministic 16-byte hex, different per script, key and leg", () => {
+  const a = orderCloid("place_bet", "pm-bet-1");
+  assert.match(a, /^0x[0-9a-f]{32}$/);
+  assert.equal(orderCloid("place_bet", "pm-bet-1"), a);
+  assert.notEqual(orderCloid("place_bet", "pm-bet-2"), a);
+  assert.notEqual(orderCloid("cancel", "pm-bet-1"), a);
+  assert.notEqual(orderCloid("place_bet", "pm-bet-1", 0), a);
+  assert.notEqual(orderCloid("place_bet", "pm-bet-1", 0), orderCloid("place_bet", "pm-bet-1", 1));
+  assert.equal(orderCloid("place_bet", "pm-bet-1", 1), orderCloid("place_bet", "pm-bet-1", "1"));
+});
+
+function orderVenueStub({ known = null, exchangeError = null } = {}) {
+  const state = { info: [], exchange: [] };
+  const realFetch = globalThis.fetch;
+  const json = (body) => new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
+  globalThis.fetch = async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (String(url).endsWith("/exchange")) {
+      state.exchange.push(body);
+      if (exchangeError) return json({ status: "ok", response: { type: "order", data: { statuses: [{ error: exchangeError }] } } });
+      return json({ status: "ok", response: { type: "order", data: { statuses: [{ resting: { oid: 42, cloid: body.action.orders[0].c } }] } } });
+    }
+    state.info.push(body);
+    if (body.type === "orderStatus") {
+      return json(known ? { status: "order", order: { order: { cloid: body.oid }, status: known, statusTimestamp: NOW } } : { status: "unknownOid" });
+    }
+    return json(null);
+  };
+  state.restore = () => {
+    globalThis.fetch = realFetch;
+  };
+  return state;
+}
+
+async function testAgent() {
+  const { generatePrivateKey, privateKeyToAccount } = await import("viem/accounts");
+  const account = privateKeyToAccount(generatePrivateKey());
+  return { address: account.address, toViemAccount: () => account, pending: null };
+}
+
+const testWire = (cloid) => outcomeOrderWire({ assetId: 100373480, side: "buy", price: "0.47", size: 40, tif: "GTC", cloid });
+
+test("placeOutcomeOrder: a cloid Hyperliquid already knows is KEY_REUSED and nothing is submitted", async () => {
+  const cloid = orderCloid("place_bet", "pm-bet-dup");
+  const stub = orderVenueStub({ known: "filled" });
+  try {
+    await assert.rejects(
+      placeOutcomeOrder({ agent: await testAgent(), trap: pendingTrap(), main: MAIN, wire: testWire(cloid) }),
+      (e) => e.code === "KEY_REUSED" && e.data.venueStatus === "filled" && e.data.cloid === cloid,
+    );
+    assert.deepEqual(stub.info, [{ type: "orderStatus", user: MAIN, oid: cloid }]);
+    assert.equal(stub.exchange.length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
+test("placeOutcomeOrder: an unknown cloid is submitted carrying that cloid", async () => {
+  const cloid = orderCloid("place_bet", "pm-bet-new");
+  const stub = orderVenueStub();
+  try {
+    const res = await placeOutcomeOrder({ agent: await testAgent(), trap: pendingTrap(), main: MAIN, wire: testWire(cloid) });
+    assert.equal(stub.exchange.length, 1);
+    const order = stub.exchange[0].action.orders[0];
+    assert.equal(order.c, cloid);
+    assert.equal(order.a, 100373480);
+    assert.equal(order.b, true);
+    assert.deepEqual(order.t, { limit: { tif: "Gtc" } });
+    assert.deepEqual(res, { orderId: "42", orderStatus: "resting", filledShares: null, cloid });
+  } finally {
+    stub.restore();
+  }
+});
+
+test("placeOutcomeOrder: Hyperliquid refusing a duplicate cloid on submit is KEY_REUSED", async () => {
+  const cloid = orderCloid("place_bet", "pm-bet-race");
+  const stub = orderVenueStub({ exchangeError: "Duplicate cloid" });
+  try {
+    await assert.rejects(
+      placeOutcomeOrder({ agent: await testAgent(), trap: pendingTrap(), main: MAIN, wire: testWire(cloid) }),
+      (e) => e.code === "KEY_REUSED" && e.data.cloid === cloid,
+    );
+  } finally {
+    stub.restore();
+  }
+});
+
+test("assertCloidFresh, orderSubmitFailure and isDuplicateCloidError", async () => {
+  await assertCloidFresh(MAIN, "0x" + "ab".repeat(16), async () => ({ status: "unknownOid" }));
+  await assert.rejects(
+    assertCloidFresh(MAIN, "0x" + "ab".repeat(16), async () => ({ status: "order", order: { status: "canceled" } })),
+    (e) => e.code === "KEY_REUSED" && e.data.venueStatus === "canceled",
+  );
+  assert.equal(isDuplicateCloidError("Order 0: Insufficient spot balance"), false);
+  const api = Object.assign(new Error("Order 0: Insufficient spot balance"), { name: "ApiRequestError" });
+  assert.equal(orderSubmitFailure(api, "0x1").code, "INSUFFICIENT_BALANCE");
+  const lost = orderSubmitFailure(new Error("fetch failed"), "0x1", { marketId: "1" });
+  assert.equal(lost.code, "ORDER_UNKNOWN");
+  assert.equal(lost.data.cloid, "0x1");
+  assert.equal(orderSubmitFailure(Object.assign(new Error("bad"), { name: "ValidationError" }), "0x1").code, "ORDER_INVALID");
+  assert.throws(() => outcomeOrderWire({ assetId: 1, side: "buy", price: "0.5", size: 4, tif: "FOK", cloid: "0x1" }), (e) => e.code === "BAD_ARGS");
+});
+
+test("classifyCancelStatuses: an order already cancelled or filled counts as done, not failed", () => {
+  const targets = [{ oid: 1, marketId: "5", coin: "#50" }, { oid: 2, marketId: "5", coin: "#51" }, { oid: 3, marketId: "5", coin: "#50" }];
+  const r = classifyCancelStatuses(targets, [
+    "success",
+    { error: "Order was never placed, already canceled, or filled. asset=100000051" },
+    { error: "Insufficient margin" },
+  ]);
+  assert.deepEqual(r.cancelled.map((x) => x.orderId), ["1"]);
+  assert.deepEqual(r.alreadyDone.map((x) => x.orderId), ["2"]);
+  assert.deepEqual(r.failed.map((x) => x.orderId), ["3"]);
 });

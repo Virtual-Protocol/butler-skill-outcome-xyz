@@ -118,13 +118,16 @@ a withdrawal and nothing on a unified account.
   `setup_agent.mjs --resume` can submit the owner's signature later (it stays valid for
   about 2 days). A withdrawal works the same way: its `time` is the nonce.
 - Orders, cancels and perps→spot moves get their nonce inside the SDK at signing time, so
-  they are never resumed: ask again with a new key.
+  they are never resumed. They are safe to re-run with the same key instead: an order
+  carries a client order id (`cloid`, 16 bytes from sha256 of
+  `prediction-market|<script>|<key>`) that `orderStatus` looks up before sending; a cancel of
+  an order already gone is `alreadyDone`; a perps↔spot move only tops up the gap.
 
 ## Reads the scripts use (Hyperliquid info API)
 
 `spotClearinghouseState` (spot balances, outcome shares as `+…` rows), `clearinghouseState`
 (perps `withdrawable`), `userAbstraction` (mode), `userRole` (`missing`, `user`, `agent`),
 `extraAgents` (approved keys with `validUntil`), `userNonFundingLedgerUpdates` (deposits and
-withdrawals).
+withdrawals), `orderStatus` (by order id or cloid: `unknownOid`, or the order and its status).
 Hyperliquid answers errors in free text with HTTP 200; the scripts map the known ones to
 codes (see `commands.md`).

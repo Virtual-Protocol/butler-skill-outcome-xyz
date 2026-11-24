@@ -25,7 +25,7 @@ export BEVO_SIGNER=$PWD/dev/local-signer.mjs
 | `OUTCOME_MAIN_WALLET` | everything (main wallet address) |
 | `OUTCOME_AGENT_PRIVATE_KEY` | an already-approved agent key; seeds the file vault once (see below) |
 | `DEV_MAIN_PRIVATE_KEY` | optional; only `deposit.mjs` and `setup_agent.mjs` need it. Without it they stop with `MAIN_SIGNER_UNAVAILABLE` |
-| `DEV_AGENT_NAME` | HL agent name when `setup_agent.mjs` approves a NEW key (default `bevo-dev`; a seeded key is recorded as `bevo`). The test wallet already uses all 3 named slots, so use `DEV_AGENT_NAME=bevo` (replaces the dev agent, never `Butler`) |
+| `DEV_AGENT_NAME` | HL agent name for a seeded key and for a NEW key `setup_agent.mjs` approves (default `bevo`, the dev agent already approved on the test wallet; it uses all 3 named slots, so the default replaces the dev agent, never `Butler`) |
 | `DEV_SIGNER_VAULT`, `DEV_SIGNER_KEY_FILE`, `DEV_SIGNER_LEDGER` | path overrides for the vault, the old key file and the ledger (tests) |
 | `ARBITRUM_RPC_URL` | default `https://arb1.arbitrum.io/rpc` |
 
@@ -114,7 +114,9 @@ Resume rules:
   `$HOME/.cache/prediction-market/pending/<key>.json`; `--resume <key>` repeats the signer call
   with the same idempotency key (the signer returns the owner's signature / tx) and finishes.
 - Every signing script takes `--idempotency-key <key>` (default: generated). Duties pass their
-  slot key so a re-fire is refused by the signer instead of betting twice.
+  slot key so a re-fire cannot bet twice: deposit and withdraw are refused by the signer's
+  ledger, `place_bet` by Hyperliquid itself (the order's cloid comes from the key and is
+  looked up with `orderStatus` first), and `cancel` answers `alreadyDone: true`.
 
 Scripts find their own files via `import.meta.url`; never `~/skills/...` (a duty's HOME is its
 duty dir; production also injects `BEVO_SKILLS_DIR`).

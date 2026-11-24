@@ -220,19 +220,31 @@ Arbitrum in about 5 minutes. A live duty with its own wallet signs with no card.
   enough free shares.
 - `done`: `market`, `outcome`, `sideName`, `side`, `size`, `price`, `notional`, `tif`,
   `orderId`, `orderStatus` (`filled` or `resting`), `filledShares` (when filled),
-  `agentHealth`.
+  `agentHealth`, `cloid`.
+- Idempotency: the order carries a Hyperliquid client order id (`cloid`) derived from the
+  `--idempotency-key`, so the same key always means the same order. Before anything else the
+  script asks Hyperliquid (`orderStatus`) for that cloid; if the venue knows it (open, filled,
+  cancelled or rejected) the script stops with `KEY_REUSED` (`data.venueStatus`, `data.cloid`)
+  and sends nothing. A submit that Hyperliquid refuses as a duplicate cloid is `KEY_REUSED`
+  too. So after `ORDER_UNKNOWN` or a run cut off with no JSON, re-running with the SAME key is
+  safe; a new key is a new order.
 - Errors: `BAD_ARGS`, `MARKET_ORDER_REFUSED`, `ORDER_BELOW_MINIMUM`, `MARKET_NOT_FOUND`,
   `MARKET_SETTLED`, `MARKET_NOT_TRADABLE`, `AGENT_INVALID`, `NEEDS_SPOT`,
-  `INSUFFICIENT_SHARES`, `ORDER_INVALID` (SDK refused, nothing sent), `ORDER_UNKNOWN`
-  (may have reached Hyperliquid), exchange codes below, `authorization_timeout`.
+  `INSUFFICIENT_SHARES`, `KEY_REUSED`, `ORDER_INVALID` (SDK refused, nothing sent),
+  `ORDER_UNKNOWN` (may have reached Hyperliquid; `data.cloid`), exchange codes below,
+  `authorization_timeout`.
 
 ### cancel.mjs (trading key, no wallet signature)
 
 `--order-id <oid> | --all [--market <id>] [--idempotency-key <key>]`
 
 Cancels open outcome orders only (other Hyperliquid orders are never touched).
-`done`: `cancelled[]` and `failed[]` (`{orderId, error}`); `--all` with nothing open →
-`done` with `cancelled: []`. Errors: `ORDER_NOT_FOUND`, `AGENT_INVALID`, exchange codes.
+`done`: `cancelled[]`, `failed[]` (`{orderId, error}`) and `alreadyDone`; `--all` with
+nothing open → `done` with `cancelled: []`. Idempotent by nature: an `--order-id` that
+Hyperliquid reports as already cancelled or filled (`orderStatus`), or a cancel answered
+"already canceled, or filled", is `done` with `alreadyDone: true` (`venueStatus` or
+`alreadyDoneOrders[]`), never an error. Errors: `ORDER_NOT_FOUND` (unknown to Hyperliquid,
+or open in another market), `AGENT_INVALID`, exchange codes.
 
 ## Exchange codes (Hyperliquid's free-text answers, mapped)
 
@@ -253,5 +265,6 @@ Other codes: `HL_UNREACHABLE` / `HL_INFO_FAILED` (Hyperliquid info API down),
 `OWNER_DECLINED` (the signer reported `approval_rejected` / `approval_expired`: the owner
 declined or let the card expire; nothing ran), `UNEXPECTED` (unknown failure: read state
 before anything), and every other signer/server code passed through, normalised to
-UPPER_SNAKE (`key_reused` → `KEY_REUSED`: this idempotency key already ran).
+UPPER_SNAKE (`key_reused` → `KEY_REUSED`: this idempotency key already ran; for
+`place_bet` the venue already holds this key's order).
 `AUTHORIZATION_TIMEOUT` hint: re-place only if the owner still wants it, with a NEW key.

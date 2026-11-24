@@ -21,6 +21,18 @@ older container stops with `SIGNER_OUTDATED` and must be redeployed first.
   `VAULT_PENDING` / `VAULT_UNAVAILABLE` in `data.agent.code` and `data.next.code`.
 - New codes `VAULT_PENDING`, `VAULT_UNAVAILABLE`, `VAULT_FULL`, `AGENT_SETUP_IN_PROGRESS`.
 - Trading-key steps no longer file an authorization card.
+- Order idempotency now comes from Hyperliquid: `place_bet.mjs` gives every order a client
+  order id (`cloid`) derived from the `--idempotency-key`, asks Hyperliquid's `orderStatus`
+  for it first and stops with `KEY_REUSED` (`data.venueStatus`, `data.cloid`) when the venue
+  already knows it; a duplicate cloid refused on submit is `KEY_REUSED` too. Re-running after
+  `ORDER_UNKNOWN` with the same key is safe. Orders are sent with `@nktkas/hyperliquid`
+  (hip4's `placeOrder` has no cloid). The bevo-server `agent_key` ledger check is gone from
+  `place_bet`, `cancel`, `ensure_spot` and `ensure_perps` (orders never pass through the
+  server); `deposit` and `withdraw` keep their server ledger check.
+- `cancel.mjs` is idempotent: an order already cancelled or filled is `done` with
+  `alreadyDone: true` instead of `ORDER_NOT_FOUND`.
+- Dev signer: `DEV_AGENT_NAME` defaults to `bevo` everywhere (the scripts said `bevo-dev`
+  while seeding recorded `bevo`).
 - `SKILL.md` follows the hub's seven sections; credentials and recovery are in
   `references/credentials.md`.
 - Dev signer: a 0600 file vault (`dev/.vault.json`) seeded once from `OUTCOME_AGENT_PRIVATE_KEY`

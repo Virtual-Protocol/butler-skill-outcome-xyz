@@ -12,7 +12,6 @@
 // authorization_timeout (nothing moved); re-run to file a new card.
 
 import {
-  assertKeyFresh,
   runScript,
   parseArgs,
   okEnvelope,
@@ -36,7 +35,6 @@ runScript(async () => {
   const amount = parseUsdAmount(args.amount, "amount");
   const signerMod = await loadSigner();
   const idempotencyKey = idempotencyKeyFrom(args, "ensure_perps", { isDev: Boolean(signerMod.isDev) });
-  await assertKeyFresh(signerMod, idempotencyKey, { route: "agent_key" });
   const signer = await signerMod.mainSigner({ idempotencyKey, deadline: scriptDeadline() });
   const main = signer.address;
 

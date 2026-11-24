@@ -179,16 +179,16 @@ main wallet.
 
 Money steps REFUSE to run without `--idempotency-key`. Use a new one for every new ask:
 `pm-<step>-<MMDD-HHMM>` (1–120 of letters, digits, `:_.-`); every output echoes it. A
-money step (any script but the reads) with an unknown outcome (timeout, cut off with no
-JSON, `ORDER_UNKNOWN`, `UNEXPECTED`): do not re-run it with a new key. First read
-status.mjs, account.mjs.
+money step with an unknown outcome (timeout, cut off with no JSON, `ORDER_UNKNOWN`,
+`UNEXPECTED`): do not re-run it with a new key. First read status.mjs, account.mjs.
 
 - `pending_owner_signature` (deposit, setup_agent, withdraw, revoke_agent): the card is
   waiting; once your owner says they signed, run exactly `data.resume` (same key,
   `--resume`). Cut off with no JSON in those four: the same command plus `--resume <key>`.
 - `authorization_timeout`: nothing ran, not resumable. If they still want it, rerun with a
   NEW key.
-- Duties pass their slot key: a re-fire is refused (`KEY_REUSED`), not doubled.
+- The same key never doubles: a re-run bet is `KEY_REUSED`, a re-run cancel `alreadyDone`.
+  Duties pass their slot key.
 - Orders go one at a time.
 
 ## Failure handling
@@ -209,7 +209,7 @@ status.mjs, account.mjs.
 | `INSUFFICIENT_HL_BALANCE`, `NOTHING_TO_WITHDRAW`, `INSUFFICIENT_BALANCE`, `INSUFFICIENT_SHARES` | use at most the hint's amount, or say it is empty; run status, step 4 or 2 |
 | `WITHDRAW_REFUSED`, `SIGN_TYPE_REFUSED`, `DEPOSIT_TX_FAILED` | nothing left; report the message |
 | `WITHDRAW_ALREADY_SUBMITTED`, `WITHDRAW_UNKNOWN` | sent already, never again; run status. Unknown: same command plus `--resume <key>` |
-| `ORDER_UNKNOWN` | do not retry; run account.mjs for the order or a fill |
+| `ORDER_UNKNOWN` | run account.mjs; retry only with the SAME key |
 | `RESUME_NOT_FOUND`, `RESUME_MISMATCH`, `KEY_REUSED` | the step finished, changed or already ran; run status and account first |
 | `OWNER_DECLINED` | nothing ran; retry only on their yes, with a NEW key |
 | `SIGNER_OUTDATED`, `DUTY_DELETED` | the container must be redeployed; the duty is gone, nothing ran. Stop |

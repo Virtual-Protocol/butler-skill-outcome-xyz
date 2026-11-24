@@ -23,7 +23,7 @@
 // Pure helpers (arg parsing, guards, error mapping, agent approval maths) are
 // exported so the unit tests can exercise them without any network.
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, dirname } from "node:path";
@@ -72,7 +72,7 @@ export const AGENT_KEY_LABEL = "outcome";
 /** Hyperliquid agent name used in production. Re-approving the same name replaces the old agent. */
 export const PROD_AGENT_NAME = "Butler";
 /** Dev default, so local tests never replace the production "Butler" agent. */
-export const DEV_AGENT_NAME_DEFAULT = "bevo-dev";
+export const DEV_AGENT_NAME_DEFAULT = "bevo";
 /** Account abstraction modes where spot and perps are one balance. */
 export const UNIFIED_MODES = new Set(["unifiedAccount", "portfolioMargin"]);
 
@@ -459,6 +459,41 @@ export async function assertKeyFresh(signerMod, key, { route = "execute", resume
   });
 }
 
+export function orderCloid(script, key, leg = null) {
+  const parts = ["prediction-market", script, key];
+  if (leg !== null && leg !== undefined) parts.push(String(leg));
+  return `0x${createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 32)}`;
+}
+
+const LIVE_ORDER_STATUSES = new Set(["open", "triggered"]);
+
+export function isLiveOrderStatus(status) {
+  return LIVE_ORDER_STATUSES.has(status);
+}
+
+export async function venueOrderStatus(user, oid, info = hlInfo) {
+  const res = await info({ type: "orderStatus", user, oid });
+  if (!res || res.status !== "order") return null;
+  return String(res.order?.status ?? "unknown");
+}
+
+export function cloidReused(cloid, venueStatus) {
+  return new SkillError("KEY_REUSED", `This --idempotency-key already placed an order on Hyperliquid (${venueStatus}); nothing new was sent.`, {
+    hint: "Run account.mjs to see that order or its fill. Use a NEW key only for a new order your owner asked for.",
+    data: { venueStatus, cloid },
+  });
+}
+
+export async function assertCloidFresh(user, cloid, info = hlInfo) {
+  const venueStatus = await venueOrderStatus(user, cloid, info);
+  if (venueStatus) throw cloidReused(cloid, venueStatus);
+}
+
+export function isDuplicateCloidError(text) {
+  const s = String(text ?? "");
+  return /cloid/i.test(s) && /duplicate|already|exist|reuse|used/i.test(s);
+}
+
 export function assertDevCap(notional, isDev, what) {
   if (isDev && notional > DEV_MAX_NOTIONAL) {
     throw new SkillError(
@@ -824,13 +859,17 @@ export function nktkasMainWallet(signer, trap) {
  * Agent-key signed move of USDC between the account's own perps ("") and spot
  * ("spot") with agentSendAsset; the destination is always the same main wallet.
  */
-export async function moveUsdcInAccount({ agent, trap, main, sourceDex, destinationDex, amount, errorData = null }) {
+export async function agentExchange(agent, trap) {
   const { ExchangeClient, HttpTransport } = await import("@nktkas/hyperliquid");
-  const exchange = new ExchangeClient({
+  return new ExchangeClient({
     transport: new HttpTransport({ isTestnet: false }),
     wallet: nktkasAgentWallet(agent, trap),
     signatureChainId: HL_SIGNATURE_CHAIN_ID,
   });
+}
+
+export async function moveUsdcInAccount({ agent, trap, main, sourceDex, destinationDex, amount, errorData = null }) {
+  const exchange = await agentExchange(agent, trap);
   try {
     await exchange.agentSendAsset({
       destination: main,
@@ -846,6 +885,63 @@ export async function moveUsdcInAccount({ agent, trap, main, sourceDex, destinat
     throw err;
   }
   trap.check(agent);
+}
+
+const HL_TIF = { GTC: "Gtc", ALO: "Alo", FAK: "Ioc" };
+
+export function outcomeOrderWire({ assetId, side, price, size, tif = "GTC", cloid }) {
+  const hlTif = HL_TIF[tif];
+  if (!hlTif) throw badArgs("--tif must be GTC, ALO or FAK");
+  return { a: assetId, b: side === "buy", p: String(price), s: String(size), r: false, t: { limit: { tif: hlTif } }, c: cloid };
+}
+
+export function orderStatusResult(status) {
+  if (status?.filled) return { orderId: String(status.filled.oid), orderStatus: "filled", filledShares: status.filled.totalSz ?? null };
+  if (status?.resting) return { orderId: String(status.resting.oid), orderStatus: "resting", filledShares: null };
+  return { orderId: null, orderStatus: typeof status === "string" ? status : "unknown", filledShares: null };
+}
+
+export function orderSubmitFailure(err, cloid, data = null) {
+  const text = String(err?.message ?? err ?? "");
+  if (isDuplicateCloidError(text)) return cloidReused(cloid, "duplicate_cloid");
+  if (err?.name === "ApiRequestError") return exchangeSkillError(text, data);
+  if (err?.name === "ValidationError") {
+    return new SkillError("ORDER_INVALID", `The SDK refused the order before sending it: ${text.slice(0, 300)}`, { data });
+  }
+  return new SkillError("ORDER_UNKNOWN", `The order result is unknown: ${text.slice(0, 300) || "no response"}.`, {
+    hint: "Run account.mjs for the order or a fill. Re-running with the SAME --idempotency-key is safe: it never places a second order.",
+    data: { ...(data ?? {}), cloid },
+  });
+}
+
+export async function placeOutcomeOrder({ agent, trap, main, wire, errorData = null, info = hlInfo }) {
+  await assertCloidFresh(main, wire.c, info);
+  const exchange = await agentExchange(agent, trap);
+  let res;
+  try {
+    res = await exchange.order({ orders: [wire], grouping: "na" });
+  } catch (err) {
+    trap.check(agent);
+    throw orderSubmitFailure(err, wire.c, errorData);
+  }
+  trap.check(agent);
+  return { ...orderStatusResult(res?.response?.data?.statuses?.[0]), cloid: wire.c };
+}
+
+const ALREADY_DONE_CANCEL_RE = /already cancel+ed|never placed|or filled/i;
+
+export function classifyCancelStatuses(targets, statuses) {
+  const results = targets.map((o, i) => {
+    const ok = statuses?.[i] === "success";
+    const error = ok ? null : statuses?.[i]?.error ?? "no status returned";
+    return { orderId: String(o.oid), marketId: o.marketId, coin: o.coin, ok, alreadyDone: !ok && ALREADY_DONE_CANCEL_RE.test(error), error };
+  });
+  return {
+    results,
+    cancelled: results.filter((r) => r.ok),
+    alreadyDone: results.filter((r) => r.alreadyDone),
+    failed: results.filter((r) => !r.ok && !r.alreadyDone),
+  };
 }
 
 // ---------------------------------------------------------------------------
