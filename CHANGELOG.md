@@ -1,5 +1,31 @@
 # Changelog
 
+## 2.0.0
+
+Breaking: the trading key now lives in the Butler's private vault (item `outcome.<wallet>`), not on
+bevo-server. The skill needs a container whose signer exports `AGENT_KEY_STORE = 'vault'`; an
+older container stops with `SIGNER_OUTDATED` and must be redeployed first.
+
+- The scripts check the stored key against Hyperliquid (`extraAgents`) before every use. A key the
+  venue no longer approves is replaced by a fresh one (never re-approved): `setup_agent.mjs` does
+  it with one wallet signature, and a trading script does it by itself when the signer says the
+  run signs hands-free (a duty's own live auto-execute wallet); otherwise it stops with
+  `AGENT_INVALID` and asks for `setup_agent.mjs`.
+- `setup_agent.mjs`: a stored, listed key is only confirmed (`alreadyApproved: true`, nothing
+  signed). A missing or invalid key is replaced without `--rotate`; `--rotate` still forces a new
+  key. The key is saved in the vault before any approval is asked. Two runs racing for the key
+  settle on the first one's key (`AGENT_SETUP_IN_PROGRESS` while it is not listed yet).
+- New `revoke_agent.mjs`: deletes the vault item, then approves a throwaway address under the same
+  agent name so Hyperliquid drops the old key (Hyperliquid has no agent delete). Resumable.
+- `status.mjs` reports a vault that is waiting for the owner's phone or unreachable as
+  `VAULT_PENDING` / `VAULT_UNAVAILABLE` in `data.agent.code` and `data.next.code`.
+- New codes `VAULT_PENDING`, `VAULT_UNAVAILABLE`, `VAULT_FULL`, `AGENT_SETUP_IN_PROGRESS`.
+- Trading-key steps no longer file an authorization card.
+- `SKILL.md` follows the hub's seven sections; credentials and recovery are in
+  `references/credentials.md`.
+- Dev signer: a 0600 file vault (`dev/.vault.json`) seeded once from `OUTCOME_AGENT_PRIVATE_KEY`
+  or the old `dev/.agent-key.json`.
+
 ## 1.0.1
 
 - Scripts never name a wallet: the server picks it from the session (a duty with its own
