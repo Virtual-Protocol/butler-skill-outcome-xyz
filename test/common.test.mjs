@@ -52,6 +52,8 @@ import {
   stepBudgetMs,
   SCRIPT_BUDGET_MS,
   BUDGET_MARGIN_MS,
+  ensureAgent,
+  bootstrapAgent,
 } from "../scripts/lib/common.mjs";
 import { mkdtempSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -107,10 +109,14 @@ test("loadSigner: a signer without SESSION_WALLET_DEFAULT -> SIGNER_OUTDATED", a
     writeFileSync(old, "export async function mainSigner(){}\nexport async function agentKey(){}\n");
     process.env.BEVO_SIGNER = old;
     await assert.rejects(loadSigner(), (e) => e.code === "SIGNER_OUTDATED");
+    const noVault = join(dir, "no-vault.mjs");
+    writeFileSync(noVault, "export const SESSION_WALLET_DEFAULT = true;\nexport async function mainSigner(){}\nexport async function agentKey(){}\n");
+    process.env.BEVO_SIGNER = noVault;
+    await assert.rejects(loadSigner(), (e) => e.code === "SIGNER_OUTDATED" && /vault/.test(e.message));
     const ok = join(dir, "ok.mjs");
-    writeFileSync(ok, "export const SESSION_WALLET_DEFAULT = true;\nexport async function mainSigner(){}\nexport async function agentKey(){}\n");
+    writeFileSync(ok, "export const SESSION_WALLET_DEFAULT = true;\nexport const AGENT_KEY_STORE = 'vault';\nexport async function mainSigner(){}\nexport async function agentKey(){}\n");
     process.env.BEVO_SIGNER = ok;
-    assert.equal((await loadSigner()).SESSION_WALLET_DEFAULT, true);
+    assert.equal((await loadSigner()).AGENT_KEY_STORE, "vault");
   } finally {
     if (prev === undefined) delete process.env.BEVO_SIGNER;
     else process.env.BEVO_SIGNER = prev;
@@ -174,6 +180,11 @@ test("signer/server codes pass through normalised; never free-text mapped", () =
   assert.equal(normalizeCode("key_reused"), "KEY_REUSED");
   assert.equal(normalizeCode("signerSealed"), "SIGNER_SEALED");
   assert.equal(normalizeCode(" SIGN-TYPE refused "), "SIGN_TYPE_REFUSED");
+  assert.equal(normalizeCode("vault_pending"), "VAULT_PENDING");
+  assert.equal(normalizeCode("vault_unavailable"), "VAULT_UNAVAILABLE");
+  assert.equal(normalizeCode("vault_full"), "VAULT_FULL");
+  assert.equal(normalizeCode("vault_conflict"), "AGENT_SETUP_IN_PROGRESS");
+  assert.equal(normalizeCode("accounts_required"), "SIGNER_OUTDATED");
   const e1 = Object.assign(new Error("dup"), { code: "key_reused" });
   assert.equal(envelopeFromError(e1).error.code, "KEY_REUSED");
   // a signer error whose text mentions "does not exist" keeps its own code
@@ -338,7 +349,7 @@ test("agentHealth signal 2: userRole must be agent of THIS main", () => {
   assert.equal(h(null).code, "AGENT_INVALID");
 });
 
-test("agentHealth: no key at all is invalid; requireValidAgent hints rotate", () => {
+test("agentHealth: no key at all is invalid; requireValidAgent hints setup_agent", () => {
   const h = classifyAgentHealth({ agents: [], role: null, main: MAIN, agentAddress: null, now: NOW });
   assert.equal(h.code, "AGENT_INVALID");
   try {
@@ -347,17 +358,17 @@ test("agentHealth: no key at all is invalid; requireValidAgent hints rotate", ()
   } catch (e) {
     assert.equal(e.code, "AGENT_INVALID");
     assert.equal(e.status, "needs_agent");
-    assert.match(e.hint, /setup_agent\.mjs --rotate/);
+    assert.match(e.hint, /setup_agent\.mjs/);
   }
   assert.doesNotThrow(() => requireValidAgent({ valid: true, code: "AGENT_EXPIRING" }));
 });
 
 // --- exchange error mapping ------------------------------------------------
 
-test("signal 3: 'does not exist' -> AGENT_INVALID with rotate hint", () => {
+test("signal 3: 'does not exist' -> AGENT_INVALID with a setup_agent hint", () => {
   const m = mapExchangeError("User or API Wallet 0x42b0519883930ad9791de0f38387fcf18fe2b9d4 does not exist.");
   assert.equal(m.code, "AGENT_INVALID");
-  assert.match(m.hint, /setup_agent\.mjs --rotate/);
+  assert.match(m.hint, /setup_agent\.mjs/);
   assert.match(m.message, /does not exist/);
 });
 
@@ -455,6 +466,9 @@ test("computeNext decisions", () => {
   assert.equal(computeNext({ hl: hl({ role: "missing" }), agent: ok }).status, "needs_deposit");
   assert.equal(computeNext({ hl: hl({ spotUsdcFree: 1 }), agent: ok }).status, "needs_deposit");
   assert.equal(computeNext({ hl: hl({ spotUsdcFree: 5 }), agent: { valid: false, everCreated: true } }).status, "needs_agent");
+  const pending = computeNext({ hl: hl({ spotUsdcFree: 5 }), agent: { valid: false, vaultCode: "VAULT_PENDING", reason: "waiting" } });
+  assert.equal(pending.code, "VAULT_PENDING");
+  assert.equal(pending.rotate, false);
   assert.equal(computeNext({ hl: hl({ perpsWithdrawable: 5 }), agent: ok }).status, "needs_spot");
   assert.equal(computeNext({ hl: hl({ unified: true, spotUsdcFree: 5 }), agent: ok }).status, "ready");
   assert.equal(computeNext({ hl: hl({ unified: true, spotUsdcFree: 5 }), agent: { valid: true, code: "AGENT_EXPIRING", daysLeft: 10, mustRotate: false } }).status, "ready");
@@ -586,4 +600,168 @@ test("assertKeyFresh: a key the ledger holds is KEY_REUSED before any other chec
   await assertKeyFresh({}, "bet-1");
   await assertKeyFresh({ keyStatus: async () => null }, "bet-1");
   await assertKeyFresh({ keyStatus: async () => { throw new Error("down"); } }, "bet-1");
+});
+
+// --- trading key lifecycle (fake signer, stubbed Hyperliquid) ----------------------
+
+const NEW_AGENT = "0x1111111111111111111111111111111111111111";
+const FAKE_SIGNATURE = `0x${"11".repeat(32)}${"22".repeat(32)}1b`;
+
+function hlStub({ agents = [], role = { role: "agent", data: { user: MAIN } } } = {}) {
+  const state = { agents: [...agents], exchangeCalls: 0 };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (String(url).endsWith("/exchange")) {
+      state.exchangeCalls++;
+      state.agents.push({ address: body.action.agentAddress, name: body.action.agentName, validUntil: Date.now() + 90 * DAY });
+      return new Response(JSON.stringify({ status: "ok" }));
+    }
+    if (body.type === "extraAgents") return new Response(JSON.stringify(state.agents));
+    if (body.type === "userRole") return new Response(JSON.stringify(role));
+    throw new Error(`unexpected HL call ${body.type}`);
+  };
+  state.restore = () => {
+    globalThis.fetch = realFetch;
+  };
+  return state;
+}
+
+function fakeKey(address, o = {}) {
+  const calls = { markApproved: [], forget: 0 };
+  return {
+    calls,
+    id: `outcome.${MAIN}`,
+    address,
+    approvedAt: null,
+    validUntil: null,
+    generated: false,
+    pending: null,
+    markApproved: async (a) => {
+      calls.markApproved.push(a);
+    },
+    forget: async () => {
+      calls.forget++;
+    },
+    ...o,
+  };
+}
+
+function fakeSignerMod({ stored = null, onFresh, throws = null }) {
+  const calls = [];
+  return {
+    calls,
+    isDev: true,
+    agentKey: async (opts) => {
+      calls.push(opts);
+      if (throws) throw throws;
+      if (opts.create === false) return stored;
+      return onFresh(opts);
+    },
+  };
+}
+
+const mainSignerFake = (approval, signed = []) => ({
+  address: MAIN,
+  approval,
+  signTypedData: async (td) => {
+    signed.push(td);
+    return FAKE_SIGNATURE;
+  },
+});
+
+test("ensureAgent: a key Hyperliquid lists is used as is, nothing is written when the vault already says so", async () => {
+  const validUntil = Date.now() + 60 * DAY;
+  const hl = hlStub({ agents: [{ address: AGENT, name: "Butler", validUntil }] });
+  try {
+    const stored = fakeKey(AGENT, { approvedAt: "2026-11-01T00:00:00.000Z", validUntil: new Date(validUntil).toISOString() });
+    const mod = fakeSignerMod({ stored });
+    const { agent, health } = await ensureAgent({ signerMod: mod, signer: mainSignerFake("auto") });
+    assert.equal(agent, stored);
+    assert.equal(health.code, "AGENT_OK");
+    assert.equal(stored.calls.markApproved.length, 0);
+    assert.equal(mod.calls.length, 1);
+    assert.equal(hl.exchangeCalls, 0);
+    assert.equal(hl.agents.length, 1);
+
+    const unrecorded = fakeKey(AGENT);
+    await ensureAgent({ signerMod: fakeSignerMod({ stored: unrecorded }), signer: mainSignerFake("card") });
+    assert.equal(unrecorded.calls.markApproved.length, 1);
+    assert.equal(unrecorded.calls.markApproved[0].validUntil, new Date(validUntil).toISOString());
+  } finally {
+    hl.restore();
+  }
+});
+
+test("ensureAgent: an unlisted key with approval auto is replaced through one ApproveAgent signature", async () => {
+  const hl = hlStub();
+  try {
+    const fresh = fakeKey(NEW_AGENT, { generated: true });
+    const mod = fakeSignerMod({ stored: fakeKey(AGENT), onFresh: () => fresh });
+    const signed = [];
+    const { agent, health } = await ensureAgent({ signerMod: mod, signer: mainSignerFake("auto", signed) });
+    assert.equal(agent, fresh);
+    assert.equal(health.code, "AGENT_OK");
+    assert.equal(signed.length, 1);
+    assert.match(signed[0].primaryType, /ApproveAgent$/);
+    assert.equal(hl.exchangeCalls, 1);
+    assert.equal(fresh.calls.markApproved.length, 1);
+    assert.equal(mod.calls[1].rotate, true);
+    assert.equal(mod.calls[1].create, true);
+    assert.equal(typeof mod.calls[1].accounts.generatePrivateKey, "function");
+  } finally {
+    hl.restore();
+  }
+});
+
+test("ensureAgent: an unlisted key with approval card asks the owner to run setup_agent", async () => {
+  const hl = hlStub();
+  try {
+    const mod = fakeSignerMod({ stored: fakeKey(AGENT), onFresh: () => assert.fail("must not make a key") });
+    await assert.rejects(ensureAgent({ signerMod: mod, signer: mainSignerFake("card") }), (e) => {
+      assert.equal(e.code, "AGENT_INVALID");
+      assert.equal(e.status, "needs_agent");
+      assert.match(e.hint, /setup_agent\.mjs/);
+      return true;
+    });
+    assert.equal(mod.calls.length, 1);
+  } finally {
+    hl.restore();
+  }
+});
+
+test("ensureAgent: a vault waiting for the phone surfaces as VAULT_PENDING", async () => {
+  const err = Object.assign(new Error("vault is waiting for the phone"), { code: "vault_pending" });
+  const mod = fakeSignerMod({ throws: err });
+  await assert.rejects(ensureAgent({ signerMod: mod, signer: mainSignerFake("auto") }), (e) => e.code === "vault_pending");
+  const env = envelopeFromError(err);
+  assert.equal(env.error.code, "VAULT_PENDING");
+  assert.match(env.error.hint, /Virtuals/);
+});
+
+test("bootstrapAgent: the loser of a key race waits for the winner's key and signs nothing", async () => {
+  const hl = hlStub({ agents: [{ address: NEW_AGENT, name: "Butler", validUntil: Date.now() + 90 * DAY }] });
+  try {
+    const winner = fakeKey(NEW_AGENT, { generated: false });
+    const mod = fakeSignerMod({ onFresh: () => winner });
+    const signed = [];
+    const out = await bootstrapAgent({ signerMod: mod, signer: mainSignerFake("auto", signed) });
+    assert.equal(out.adopted, true);
+    assert.equal(out.agent, winner);
+    assert.equal(signed.length, 0);
+    assert.equal(hl.exchangeCalls, 0);
+    assert.equal(winner.calls.markApproved.length, 1);
+  } finally {
+    hl.restore();
+  }
+});
+
+test("bootstrapAgent: a resume of another key is RESUME_MISMATCH", async () => {
+  const mod = fakeSignerMod({ stored: fakeKey(AGENT) });
+  await assert.rejects(
+    bootstrapAgent({ signerMod: mod, signer: mainSignerFake("auto"), rec: { agentAddress: NEW_AGENT, agentName: "Butler", nonce: 1 } }),
+    (e) => e.code === "RESUME_MISMATCH",
+  );
+  assert.equal(mod.calls[0].create, false);
+  assert.equal(mod.calls[0].rotate, false);
 });

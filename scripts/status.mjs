@@ -18,6 +18,8 @@ import {
   agentHealth,
   agentNameFor,
   parseUsdAmount,
+  normalizeCode,
+  viemAccounts,
   SkillError,
   AGENT_KEY_LABEL,
   MIN_ORDER_NOTIONAL,
@@ -33,6 +35,7 @@ runScript(async () => {
 
   let main;
   let agentKeyObj = null;
+  let vaultProblem = null;
   let signerMod = null;
   let signerScope = null;
   if (args.address) {
@@ -43,11 +46,17 @@ runScript(async () => {
     const signer = await signerMod.mainSigner({});
     main = signer.address;
     signerScope = signer.walletScope ?? null;
-    agentKeyObj = await signerMod.agentKey({
-      label: AGENT_KEY_LABEL,
-      rotate: false,
-      create: false,
-    });
+    try {
+      agentKeyObj = await signerMod.agentKey({
+        label: AGENT_KEY_LABEL,
+        accounts: await viemAccounts(),
+        create: false,
+      });
+    } catch (err) {
+      const code = typeof err?.code === "string" ? normalizeCode(err.code) : null;
+      if (code !== "VAULT_PENDING" && code !== "VAULT_UNAVAILABLE") throw err;
+      vaultProblem = { code, message: String(err.message ?? code).slice(0, 200) };
+    }
   }
 
   const [hl, arb, agents] = await Promise.all([
@@ -59,7 +68,9 @@ runScript(async () => {
   let agent = null;
   if (signerMod) {
     // Validity comes only from agentHealth (extraAgents + userRole), never from the signer's flag.
-    const health = await agentHealth(main, agentKeyObj?.address ?? null);
+    const health = vaultProblem
+      ? { valid: false, code: vaultProblem.code, vaultCode: vaultProblem.code, reason: vaultProblem.message }
+      : await agentHealth(main, agentKeyObj?.address ?? null);
     agent = {
       ...health,
       address: agentKeyObj?.address ?? null,

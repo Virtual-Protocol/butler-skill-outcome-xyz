@@ -8,7 +8,7 @@
 //   node ensure_perps.mjs --amount <usd> [--idempotency-key <key>]
 //
 // status: done | needs_agent | authorization_timeout
-// Not resumable: an agent-key authorization that times out is reported as
+// Not resumable: a card for repairing a lapsed key that times out is reported as
 // authorization_timeout (nothing moved); re-run to file a new card.
 
 import {
@@ -19,8 +19,7 @@ import {
   loadSigner,
   parseUsdAmount,
   readHlBalances,
-  agentHealth,
-  requireValidAgent,
+  ensureAgent,
   moveUsdcInAccount,
   pendingTrap,
   ceilCents,
@@ -28,7 +27,6 @@ import {
   sleep,
   SkillError,
   SIGNER_FLAGS,
-  AGENT_KEY_LABEL,
   idempotencyKeyFrom,
   scriptDeadline,
 } from "./lib/common.mjs";
@@ -39,7 +37,8 @@ runScript(async () => {
   const signerMod = await loadSigner();
   const idempotencyKey = idempotencyKeyFrom(args, "ensure_perps", { isDev: Boolean(signerMod.isDev) });
   await assertKeyFresh(signerMod, idempotencyKey, { route: "agent_key" });
-  const main = (await signerMod.mainSigner({ idempotencyKey, deadline: scriptDeadline() })).address;
+  const signer = await signerMod.mainSigner({ idempotencyKey, deadline: scriptDeadline() });
+  const main = signer.address;
 
   const hl = await readHlBalances(main);
   const base = { mainWallet: main, target: amount, abstraction: hl.abstraction };
@@ -52,14 +51,7 @@ runScript(async () => {
   const gap = ceilCents(amount - hl.perpsWithdrawable);
   if (hl.spotUsdcFree < gap) throw insufficient(amount, round6(hl.spotUsdcFree + hl.perpsWithdrawable), base);
 
-  const agent = await signerMod.agentKey({
-    label: AGENT_KEY_LABEL,
-    rotate: false,
-    create: false,
-    idempotencyKey,
-    deadline: scriptDeadline(),
-  });
-  requireValidAgent(await agentHealth(main, agent?.address ?? null));
+  const { agent } = await ensureAgent({ signerMod, signer });
 
   await moveUsdcInAccount({
     agent,

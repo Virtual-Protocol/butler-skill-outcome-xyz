@@ -22,15 +22,13 @@ import {
   validateOrder,
   resolveSideIndex,
   readHlBalances,
-  agentHealth,
-  requireValidAgent,
+  ensureAgent,
   hip4AgentSigner,
   pendingTrap,
   placeOrderFailure,
   ceilCents,
   SkillError,
   SIGNER_FLAGS,
-  AGENT_KEY_LABEL,
   idempotencyKeyFrom,
   scriptDeadline,
 } from "./lib/common.mjs";
@@ -67,7 +65,8 @@ runScript(async () => {
     const idempotencyKey = idempotencyKeyFrom(args, "place_bet", { isDev: Boolean(signerMod.isDev) });
     await assertKeyFresh(signerMod, idempotencyKey, { route: "agent_key" });
     const order = validateOrder({ size: args.size, price: args.price, side, isDev: Boolean(signerMod.isDev) });
-    const main = (await signerMod.mainSigner({ idempotencyKey, deadline: scriptDeadline() })).address;
+    const signer = await signerMod.mainSigner({ idempotencyKey, deadline: scriptDeadline() });
+    const main = signer.address;
 
     const hip4 = await createHip4();
     try {
@@ -84,14 +83,7 @@ runScript(async () => {
       const sideIndex = resolveSideIndex(args.outcome, market.sides);
       const coin = market.sides[sideIndex].coin;
 
-      const agent = await signerMod.agentKey({
-        label: AGENT_KEY_LABEL,
-        rotate: false,
-        create: false,
-        idempotencyKey,
-        deadline: scriptDeadline(),
-      });
-      const health = requireValidAgent(await agentHealth(main, agent?.address ?? null));
+      const { agent, health } = await ensureAgent({ signerMod, signer });
 
       const hl = await readHlBalances(main);
       if (side === "buy" && hl.spotUsdcFree < order.notional) {

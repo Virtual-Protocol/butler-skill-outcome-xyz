@@ -13,14 +13,12 @@ import {
   okEnvelope,
   loadSigner,
   createHip4,
-  agentHealth,
-  requireValidAgent,
+  ensureAgent,
   hip4AgentSigner,
   pendingTrap,
   exchangeSkillError,
   SkillError,
   SIGNER_FLAGS,
-  AGENT_KEY_LABEL,
   idempotencyKeyFrom,
   scriptDeadline,
 } from "./lib/common.mjs";
@@ -38,7 +36,8 @@ runScript(async () => {
     const signerMod = await loadSigner();
     const idempotencyKey = idempotencyKeyFrom(args, "cancel", { isDev: Boolean(signerMod.isDev) });
     await assertKeyFresh(signerMod, idempotencyKey, { route: "agent_key" });
-    const main = (await signerMod.mainSigner({ idempotencyKey, deadline: scriptDeadline() })).address;
+    const signer = await signerMod.mainSigner({ idempotencyKey, deadline: scriptDeadline() });
+    const main = signer.address;
 
     const hip4 = await createHip4();
     try {
@@ -56,14 +55,7 @@ runScript(async () => {
         });
       }
 
-      const agent = await signerMod.agentKey({
-        label: AGENT_KEY_LABEL,
-        rotate: false,
-        create: false,
-        idempotencyKey,
-        deadline: scriptDeadline(),
-      });
-      requireValidAgent(await agentHealth(main, agent?.address ?? null));
+      const { agent } = await ensureAgent({ signerMod, signer });
 
       const trap = pendingTrap();
       await hip4.auth.initAuth(main, hip4AgentSigner(agent, trap));
