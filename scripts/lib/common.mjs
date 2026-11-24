@@ -648,6 +648,14 @@ export function requireValidAgent(health) {
   });
 }
 
+export function labelAgents(agents, { ourName = null, storedAddress = null, keyKnown = false } = {}, now = Date.now()) {
+  return (agents ?? []).map((a) => {
+    const approval = agentApproval(agents, a.address, now);
+    const ours = ourName !== null && approval.name === ourName;
+    return { ...approval, ours, placeholder: ours && keyKnown && !storedAddress };
+  });
+}
+
 export function agentNameFor(signerModule) {
   if (signerModule?.isDev) return process.env.DEV_AGENT_NAME || DEV_AGENT_NAME_DEFAULT;
   return PROD_AGENT_NAME;

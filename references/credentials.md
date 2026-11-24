@@ -58,6 +58,13 @@ address. It then waits until the old address is gone from `extraAgents`
 (`goneFromHyperliquid`). The throwaway key is discarded at once. Retire the key after the last
 withdrawal landed, never with orders open (they would be uncancellable by this skill).
 
+After a revoke, exactly one throwaway approval stays listed under our agent name. It signs
+nothing (its key is gone) and `status.mjs` marks it `placeholder: true` in `allAgents`. The
+next `setup_agent.mjs` approves its fresh key under the same name, which replaces the
+placeholder: from then on only the new key is listed under that name. Agents under other names
+(`ours: false`, for example ones the Outcome website created) belong to someone else; this
+skill never replaces or removes them, and they do not count as leftovers of a revoke.
+
 ## Recovery
 
 | Situation | What happens |

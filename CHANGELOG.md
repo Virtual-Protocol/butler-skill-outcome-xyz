@@ -34,6 +34,9 @@ older container stops with `SIGNER_OUTDATED` and must be redeployed first.
   (hip4's `placeOrder` has no cloid). The bevo-server `agent_key` ledger check is gone from
   `place_bet`, `cancel`, `ensure_spot` and `ensure_perps` (orders never pass through the
   server); `deposit` and `withdraw` keep their server ledger check.
+- `status.mjs` marks each `allAgents` entry `ours` (this skill's agent name) and `placeholder`
+  (ours while no key is stored: the throwaway a revoke left until the next setup replaces it).
+  Duties report a `walletScope: "main"` run in their first note.
 - `cancel.mjs` is idempotent: an order already cancelled or filled is `done` with
   `alreadyDone: true` instead of `ORDER_NOT_FOUND`.
 - Dev signer: `DEV_AGENT_NAME` defaults to `bevo` everywhere (the scripts said `bevo-dev`

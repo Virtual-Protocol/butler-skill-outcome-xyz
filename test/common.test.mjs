@@ -55,6 +55,7 @@ import {
   ensureAgent,
   bootstrapAgent,
   readStoredAgent,
+  labelAgents,
   orderCloid,
   outcomeOrderWire,
   placeOutcomeOrder,
@@ -934,4 +935,21 @@ test("classifyCancelStatuses: an order already cancelled or filled counts as don
   assert.deepEqual(r.cancelled.map((x) => x.orderId), ["1"]);
   assert.deepEqual(r.alreadyDone.map((x) => x.orderId), ["2"]);
   assert.deepEqual(r.failed.map((x) => x.orderId), ["3"]);
+});
+
+test("labelAgents: only our name with no stored key is the revoke placeholder; other names are never ours", () => {
+  const agents = [
+    { address: AGENT, name: "Butler", validUntil: null },
+    { address: NEW_AGENT, name: "outcome.xyz", validUntil: null },
+  ];
+  const revoked = labelAgents(agents, { ourName: "Butler", storedAddress: null, keyKnown: true }, NOW);
+  assert.deepEqual(revoked.map((a) => [a.name, a.ours, a.placeholder]), [["Butler", true, true], ["outcome.xyz", false, false]]);
+  const live = labelAgents(agents, { ourName: "Butler", storedAddress: AGENT, keyKnown: true }, NOW);
+  assert.equal(live[0].placeholder, false);
+  const pending = labelAgents(agents, { ourName: "Butler", storedAddress: null, keyKnown: false }, NOW);
+  assert.equal(pending[0].placeholder, false);
+  const addressMode = labelAgents(agents, {}, NOW);
+  assert.deepEqual(addressMode.map((a) => a.ours), [false, false]);
+  assert.equal(revoked[0].address, AGENT);
+  assert.equal(revoked[0].approved, true);
 });

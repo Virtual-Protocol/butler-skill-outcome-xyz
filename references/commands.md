@@ -56,7 +56,10 @@ any wallet with no signer and skips the trading-key check.
   when the vault is not restored on this Butler yet: no key here, so `needs_agent` with
   `AGENT_INVALID` and `next.vaultState`; run `setup_agent.mjs`, never wait). `null` with
   `--address`.
-- `allAgents`: every agent the wallet has approved on Hyperliquid (max 3 named).
+- `allAgents`: every agent the wallet has approved on Hyperliquid (max 3 named), each with
+  `ours` (listed under this skill's agent name) and `placeholder` (ours while no key is stored
+  here: the throwaway a revoke left, replaced by the next setup; false while the vault is
+  pending or unreadable).
 - `hyperliquid`: `role` (`missing` = never deposited), `abstraction`, `unified`,
   `spotUsdcFree`, `spotUsdcHold` (locked in open orders), `perpsWithdrawable`,
   `perpsAccountValue`.

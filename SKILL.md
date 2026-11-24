@@ -152,7 +152,9 @@ step waits ~1.5 min: tell your owner BEFORE you run it.
     node "${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market/scripts/revoke_agent.mjs" --idempotency-key pm-rev-1119-1040
     ```
 
-    `revoked: true` → deleted and dropped by Hyperliquid; `false` → there was no key.
+    `revoked: true` → deleted and dropped by Hyperliquid; `false` → no key. Its throwaway
+    (`allAgents[].placeholder`) is replaced by the next setup; other names (`ours: false`)
+    are not ours.
 
 ### Actions
 
@@ -169,7 +171,8 @@ always files one, a duty's own live auto-execute wallet none.
 
 ### Duty usage
 
-Errand: deposit → key → spot → orders → withdraw → retire. Per tick: status, then place_bet or cancel as instructed. The close sweep runs in the duty's own session BEFORE it is deleted:
+Errand: deposit → key → spot → orders → withdraw → retire. `walletScope: "main"` before the
+first money step: say in the duty's first note that it trades the owner's main wallet. Per tick: status, then place_bet or cancel as instructed. The close sweep runs in the duty's own session BEFORE it is deleted:
 `cancel.mjs --all` → sell open positions at the best bid with `--tif FAK` (no bid: leave
 them to settle) → `ensure_perps.mjs` → `withdraw.mjs --all` → status until the USDC shows
 on Arbitrum → `revoke_agent.mjs`. Deleting the duty then returns the wallet's balance to the
@@ -178,7 +181,7 @@ main wallet.
 ## Idempotency and retries
 
 Money steps REFUSE to run without `--idempotency-key`. Use a new one for every new ask:
-`pm-<step>-<MMDD-HHMM>` (1–120 of letters, digits, `:_.-`); every output echoes it. A
+`pm-<step>-<MMDD-HHMM>`; every output echoes it. A
 money step with an unknown outcome (timeout, cut off with no JSON, `ORDER_UNKNOWN`,
 `UNEXPECTED`): do not re-run it with a new key. First read status.mjs, account.mjs.
 

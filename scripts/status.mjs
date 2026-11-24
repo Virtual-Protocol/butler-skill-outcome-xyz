@@ -14,7 +14,7 @@ import {
   readHlBalances,
   readArbitrumBalances,
   fetchExtraAgents,
-  agentApproval,
+  labelAgents,
   agentHealth,
   agentNameFor,
   parseUsdAmount,
@@ -85,7 +85,11 @@ runScript(async () => {
     mainWallet: main,
     walletScope: signerScope,
     agent,
-    allAgents: agents.map((a) => agentApproval(agents, a.address)),
+    allAgents: labelAgents(agents, {
+      ourName: signerMod ? agentNameFor(signerMod) : null,
+      storedAddress: agentKeyObj?.address ?? null,
+      keyKnown: Boolean(signerMod) && !vaultState && !vaultProblem,
+    }),
     hyperliquid: {
       role: hl.role,
       abstraction: hl.abstraction,
