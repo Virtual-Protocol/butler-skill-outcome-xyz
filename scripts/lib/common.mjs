@@ -1262,6 +1262,23 @@ export async function createHip4() {
   return hip4;
 }
 
+/** Coin lookups over fetchMarkets() output: names per outcome coin, outcome-coin test, describe(coin). */
+export function outcomeCatalog(markets, parseSideCoin) {
+  const byCoin = new Map();
+  for (const m of Array.isArray(markets) ? markets : []) {
+    m.sides.forEach((s, i) =>
+      byCoin.set(s.coin, { marketId: String(m.outcomeId), market: m.parsedName ?? m.name, question: m.parsedQuestionName ?? null, outcome: i === 0 ? "YES" : "NO", side: s.parsedName ?? s.name }),
+    );
+  }
+  const isOutcomeCoin = (coin) => /^[#+]\d+$/.test(coin ?? "") && parseSideCoin(coin) !== null;
+  const describe = (coin) => {
+    const p = parseSideCoin(coin);
+    const hash = `#${coin.slice(1)}`;
+    return byCoin.get(hash) ?? { marketId: p ? String(p.outcomeId) : null, market: null, outcome: p?.sideIndex === 0 ? "YES" : "NO", side: null };
+  };
+  return { byCoin, isOutcomeCoin, describe };
+}
+
 /** Resolve --outcome (YES/NO, 0/1, or a side name) to a side index. */
 export function resolveSideIndex(outcome, sides) {
   const o = String(outcome ?? "").trim();

@@ -8,7 +8,7 @@
 // Settlement is read with client.fetchSettledOutcome (event status is almost
 // always "active" and cannot be trusted). Winning shares auto-redeem to USDC.
 
-import { runScript, parseArgs, okEnvelope, loadSigner, createHip4, readHlBalances, settledNames, SkillError } from "./lib/common.mjs";
+import { runScript, parseArgs, okEnvelope, loadSigner, createHip4, readHlBalances, outcomeCatalog, settledNames, SkillError } from "./lib/common.mjs";
 
 const MAX_SETTLED_LOOKUPS = 15;
 
@@ -43,18 +43,7 @@ runScript(async () => {
       readHlBalances(main),
     ]);
 
-    const byCoin = new Map();
-    for (const m of Array.isArray(markets) ? markets : []) {
-      m.sides.forEach((s, i) =>
-        byCoin.set(s.coin, { marketId: String(m.outcomeId), market: m.parsedName ?? m.name, question: m.parsedQuestionName ?? null, outcome: i === 0 ? "YES" : "NO", side: s.parsedName ?? s.name }),
-      );
-    }
-    const isOutcomeCoin = (coin) => /^[#+]\d+$/.test(coin ?? "") && parseSideCoin(coin) !== null;
-    const describe = (coin) => {
-      const p = parseSideCoin(coin);
-      const hash = `#${coin.slice(1)}`;
-      return byCoin.get(hash) ?? { marketId: p ? String(p.outcomeId) : null, market: null, outcome: p?.sideIndex === 0 ? "YES" : "NO", side: null };
-    };
+    const { byCoin, isOutcomeCoin, describe } = outcomeCatalog(markets, parseSideCoin);
 
     const outcomeOrders = openOrders
       .filter((o) => isOutcomeCoin(o.coin))

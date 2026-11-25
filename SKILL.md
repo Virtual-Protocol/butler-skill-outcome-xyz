@@ -1,8 +1,8 @@
 ---
 name: prediction-market
 description: "Bet on Outcome.xyz prediction markets (Hyperliquid HIP-4): find markets, fund or withdraw from Hyperliquid, set up the trading key, place or cancel limit orders, read positions. Runs scripts."
-version: 2.0.0
-metadata: {"butler":{"moneyMoving":true,"keywords":["prediction market","outcome","outcome.xyz","HIP-4","hyperliquid prediction","bet on","buy yes","buy no","sell prediction","prediction positions","prediction balance","cancel prediction order","deposit hyperliquid","withdraw from hyperliquid","withdraw prediction","trading key"],"requires":{"bins":["acp","bevo-wallet","node","npm"]}}}
+version: 2.1.0
+metadata: {"butler":{"moneyMoving":true,"portfolio":{"script":"scripts/portfolio.mjs","site":"https://outcome.xyz","name":"Outcome","chains":["evm"]},"keywords":["prediction market","outcome","outcome.xyz","HIP-4","hyperliquid prediction","bet on","buy yes","buy no","sell prediction","prediction positions","prediction balance","cancel prediction order","deposit hyperliquid","withdraw from hyperliquid","withdraw prediction","trading key"],"requires":{"bins":["acp","bevo-wallet","node","npm"]}}}
 ---
 
 ## When to use
@@ -28,7 +28,8 @@ If it fails, say so and stop. Scripts live at
 in every command. The scripts: `scripts/status.mjs`, `scripts/markets.mjs`,
 `scripts/account.mjs`, `scripts/setup_agent.mjs`, `scripts/deposit.mjs`,
 `scripts/ensure_spot.mjs`, `scripts/ensure_perps.mjs`, `scripts/withdraw.mjs`,
-`scripts/place_bet.mjs`, `scripts/cancel.mjs`, `scripts/revoke_agent.mjs`.
+`scripts/place_bet.mjs`, `scripts/cancel.mjs`, `scripts/revoke_agent.mjs`,
+`scripts/portfolio.mjs`.
 
 ### Credentials
 
@@ -141,6 +142,40 @@ A card step waits ~1.5 min: tell your owner BEFORE you run it. Per script:
 
     A throwaway approval stays under our name (`placeholder: true`) until the next setup
     replaces it; other names (`ours: false`) are not ours.
+
+### Portfolio
+
+Read-only view of one wallet's Outcome bets, as `portfolio/v1`. No signer, no key, nothing
+printed but the JSON envelope; the exit code is always 0, so act on `ok` and `status`.
+`scripts/portfolio.mjs` composes the exports of `scripts/lib/portfolio.mjs`:
+`getPositions(wallet)`, `getOpenOrders(wallet)`, `getBalances(wallet)` and the pure
+`toPortfolio({wallet, positions, asOf})`.
+
+| Command | Prints |
+|---|---|
+| `portfolio.mjs --wallet 0x...` | the full envelope: bets only, `availableUsd: null`, `orders: null` |
+| `portfolio.mjs positions --wallet 0x...` | the bets held |
+| `portfolio.mjs orders --wallet 0x...` | open Outcome orders (chat only, not in the full portfolio) |
+| `portfolio.mjs balances --wallet 0x...` | Hyperliquid spot USDC (chat only, not in the full portfolio) |
+
+```sh
+node "${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market/scripts/portfolio.mjs" --wallet "$WALLET"
+```
+
+```json
+{"ok":true,"status":"done","data":{"wallet":"<the --wallet address>","asOf":"2026-11-25T10:00:00.000Z","currency":"USD","valueUsd":12.5,"availableUsd":null,"positions":[{"id":"#291020","market":"Bulgaria v Iceland","outcome":"YES","side":"Yes","size":25,"unit":"shares","entryPrice":0.45,"markPrice":0.5,"valueUsd":12.5,"pnlUsd":1.25,"details":[{"label":"Coin","value":"#291020"},{"label":"Pays if it wins (USD)","value":"25"}]}],"orders":null},"error":null}
+```
+
+`valueUsd` counts the bets only: shares × mark price (the live mid), for every outcome
+held. Cash on Hyperliquid and perps belong to the Hyperliquid read, so they are never in it.
+`size` is shares; `outcome` is YES or NO; `side` is the side's name; `entryPrice` and
+`pnlUsd` are null when the cost basis is unknown. `status: "not_used"` means the wallet
+never held, traded or ordered an outcome. A wallet whose bets all settled is `done` with
+`valueUsd: 0`. Errors: `RATE_LIMITED` (HTTP 429), `VENUE_DOWN` (5xx or network),
+`UNEXPECTED`, `BAD_ARGS` (not a 0x address).
+
+When your owner asks "my positions on Outcome": run `portfolio.mjs positions --wallet <their
+wallet>` and quote this turn's output; for orders or cash run `orders` or `balances`.
 
 ### Duty usage
 

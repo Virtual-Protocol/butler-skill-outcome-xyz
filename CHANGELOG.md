@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.0
+
+- New read-only `scripts/portfolio.mjs` and `scripts/lib/portfolio.mjs`: one wallet's Outcome
+  bets as `portfolio/v1` (`--wallet`), plus `positions`, `orders` and `balances` subcommands for
+  chat. Bets only: `availableUsd` and `orders` are null in the full portfolio. Declared as
+  `metadata.butler.portfolio`.
+- `account.mjs` shares the outcome coin lookup with it (`outcomeCatalog` in `lib/common.mjs`).
+
 ## 2.0.0
 
 Breaking: the trading key now lives in the Butler's private vault (item `outcome.<wallet>`), not on
