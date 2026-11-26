@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseSideCoin } from "@outcome.xyz/hip4";
 import { SkillError } from "../scripts/lib/common.mjs";
-import { getPositions, getOpenOrders, getBalances, toPortfolio, readPortfolio, mapVenueError } from "../scripts/lib/portfolio.mjs";
+import { getPositions, getOpenOrders, getBalances, toPortfolio, readPortfolio, mapVenueError, readAddress } from "../scripts/lib/portfolio.mjs";
 
 const WALLET = "0x1111111111111111111111111111111111111111";
 const ASOF = "2026-11-25T10:00:00.000Z";
@@ -210,4 +210,10 @@ test("5xx and network failures map to VENUE_DOWN", () => {
 test("anything else is UNEXPECTED and a bad wallet is BAD_ARGS", async () => {
   assert.equal(mapVenueError(new Error("kaboom")).code, "UNEXPECTED");
   await assert.rejects(getPositions("nope", deps(fakeHip4())), (e) => e.code === "BAD_ARGS");
+});
+
+test("reads --address, ignoring a --wallet id beside it, and still reads a lone --wallet address", () => {
+  assert.equal(readAddress({ wallet: "11111111-2222-4333-8444-555555555555", address: WALLET }), WALLET);
+  assert.equal(readAddress({ wallet: WALLET }), WALLET);
+  assert.throws(() => readAddress({}), (err) => err instanceof SkillError && err.code === "BAD_ARGS");
 });

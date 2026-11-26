@@ -1,7 +1,7 @@
 ---
 name: prediction-market
 description: "Bet on Outcome.xyz prediction markets (Hyperliquid HIP-4): find markets, fund or withdraw from Hyperliquid, set up the trading key, place or cancel limit orders, read positions. Runs scripts."
-version: 2.1.0
+version: 2.1.1
 metadata: {"butler":{"moneyMoving":true,"portfolio":{"script":"scripts/portfolio.mjs","site":"https://outcome.xyz","name":"Outcome","chains":["evm"]},"keywords":["prediction market","outcome","outcome.xyz","HIP-4","hyperliquid prediction","bet on","buy yes","buy no","sell prediction","prediction positions","prediction balance","cancel prediction order","deposit hyperliquid","withdraw from hyperliquid","withdraw prediction","trading key"],"requires":{"bins":["acp","bevo-wallet","node","npm"]}}}
 ---
 
@@ -153,17 +153,20 @@ printed but the JSON envelope; the exit code is always 0, so act on `ok` and `st
 
 | Command | Prints |
 |---|---|
-| `portfolio.mjs --wallet 0x...` | the full envelope: bets only, `availableUsd: null`, `orders: null` |
-| `portfolio.mjs positions --wallet 0x...` | the bets held |
-| `portfolio.mjs orders --wallet 0x...` | open Outcome orders (chat only, not in the full portfolio) |
-| `portfolio.mjs balances --wallet 0x...` | Hyperliquid spot USDC (chat only, not in the full portfolio) |
+| `portfolio.mjs --address 0x...` | the full envelope: bets only, `availableUsd: null`, `orders: null` |
+| `portfolio.mjs positions --address 0x...` | the bets held |
+| `portfolio.mjs orders --address 0x...` | open Outcome orders (chat only, not in the full portfolio) |
+| `portfolio.mjs balances --address 0x...` | Hyperliquid spot USDC (chat only, not in the full portfolio) |
 
 ```sh
-node "${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market/scripts/portfolio.mjs" --wallet "$WALLET"
+node "${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market/scripts/portfolio.mjs" --address "$WALLET"
 ```
 
+The Butler's sync also passes `--wallet <walletId>` for a Butler wallet; the read uses
+`--address` only. A lone `--wallet 0x...` still reads that address.
+
 ```json
-{"ok":true,"status":"done","data":{"wallet":"<the --wallet address>","asOf":"2026-11-25T10:00:00.000Z","currency":"USD","valueUsd":12.5,"availableUsd":null,"positions":[{"id":"#291020","market":"Bulgaria v Iceland","outcome":"YES","side":"Yes","size":25,"unit":"shares","entryPrice":0.45,"markPrice":0.5,"valueUsd":12.5,"pnlUsd":1.25,"details":[{"label":"Coin","value":"#291020"},{"label":"Pays if it wins (USD)","value":"25"}]}],"orders":null},"error":null}
+{"ok":true,"status":"done","data":{"wallet":"<the --address address>","asOf":"2026-11-25T10:00:00.000Z","currency":"USD","valueUsd":12.5,"availableUsd":null,"positions":[{"id":"#291020","market":"Bulgaria v Iceland","outcome":"YES","side":"Yes","size":25,"unit":"shares","entryPrice":0.45,"markPrice":0.5,"valueUsd":12.5,"pnlUsd":1.25,"details":[{"label":"Coin","value":"#291020"},{"label":"Pays if it wins (USD)","value":"25"}]}],"orders":null},"error":null}
 ```
 
 `valueUsd` counts the bets only: shares × mark price (the live mid), for every outcome
@@ -174,7 +177,7 @@ never held, traded or ordered an outcome. A wallet whose bets all settled is `do
 `valueUsd: 0`. Errors: `RATE_LIMITED` (HTTP 429), `VENUE_DOWN` (5xx or network),
 `UNEXPECTED`, `BAD_ARGS` (not a 0x address).
 
-When your owner asks "my positions on Outcome": run `portfolio.mjs positions --wallet <their
+When your owner asks "my positions on Outcome": run `portfolio.mjs positions --address <their
 wallet>` and quote this turn's output; for orders or cash run `orders` or `balances`.
 
 ### Duty usage

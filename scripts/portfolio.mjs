@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 // Read-only. One wallet's Outcome (Hyperliquid HIP-4) bets as portfolio/v1.
 //
-//   node portfolio.mjs --wallet 0x...              full envelope, bets only
-//   node portfolio.mjs positions --wallet 0x...    bets held
-//   node portfolio.mjs orders --wallet 0x...       open outcome orders (chat only)
-//   node portfolio.mjs balances --wallet 0x...     Hyperliquid spot USDC (chat only)
+//   node portfolio.mjs --address 0x...              full envelope, bets only
+//   node portfolio.mjs positions --address 0x...    bets held
+//   node portfolio.mjs orders --address 0x...       open outcome orders (chat only)
+//   node portfolio.mjs balances --address 0x...     Hyperliquid spot USDC (chat only)
+//   The Butler also passes --wallet <walletId>; --wallet 0x... alone still reads that address.
 
 import { runScript, okEnvelope, errorEnvelope, parseArgs, SkillError } from "./lib/common.mjs";
-import { assertWallet, getBalances, getOpenOrders, getPositions, mapVenueError, readPortfolio } from "./lib/portfolio.mjs";
+import { assertWallet, readAddress, getBalances, getOpenOrders, getPositions, mapVenueError, readPortfolio } from "./lib/portfolio.mjs";
 
 const SUBCOMMANDS = new Set(["positions", "orders", "balances"]);
 
@@ -15,8 +16,8 @@ await runScript(async () => {
   const argv = process.argv.slice(2);
   const sub = argv[0] && !argv[0].startsWith("-") ? argv.shift() : null;
   if (sub && !SUBCOMMANDS.has(sub)) throw new SkillError("BAD_ARGS", `unknown subcommand ${sub}`);
-  const args = parseArgs(argv, { wallet: { type: "string", required: true } });
-  const wallet = assertWallet(args.wallet);
+  const args = parseArgs(argv, { wallet: { type: "string" }, address: { type: "string" } });
+  const wallet = assertWallet(readAddress(args));
   try {
     if (sub === "positions") return okEnvelope("done", { wallet, asOf: new Date().toISOString(), positions: await getPositions(wallet) });
     if (sub === "orders") {

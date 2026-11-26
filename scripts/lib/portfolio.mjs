@@ -6,8 +6,14 @@ export const FILLS_LOOKBACK_START_MS = 0;
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
+export function readAddress(args) {
+  if (args.address !== undefined) return args.address;
+  if (args.wallet !== undefined) return args.wallet;
+  throw new SkillError("BAD_ARGS", "--address is required");
+}
+
 export function assertWallet(wallet) {
-  if (!ADDRESS_RE.test(String(wallet ?? ""))) throw new SkillError("BAD_ARGS", "--wallet must be a 0x address");
+  if (!ADDRESS_RE.test(String(wallet ?? ""))) throw new SkillError("BAD_ARGS", "--address must be a 0x address");
   return wallet;
 }
 

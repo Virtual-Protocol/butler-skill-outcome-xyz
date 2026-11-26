@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.1
+
+- `portfolio.mjs` reads the wallet from `--address`, and accepts the Butler's `--wallet <walletId>`
+  beside it. A lone `--wallet 0x...` still reads that address, as in 2.1.0.
+
 ## 2.1.0
 
 - New read-only `scripts/portfolio.mjs` and `scripts/lib/portfolio.mjs`: one wallet's Outcome
