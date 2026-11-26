@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.3.1
+
+- Docs only: a duty reads the result of scripts and `acp` the way the duty-code skill shows and
+  never parses either output by hand (`acp --json` has `code` at the top and a sentence `error`;
+  the scripts nest `error: {code, message, hint}`).
+- "Waiting for a deposit": deposit once, save the idempotency key in the duty's state before
+  sending, then only read the venue status until it is credited; never resend with a new key or
+  amount.
+
 ## 2.3.0
 
 - Renamed: the skill is `outcome-xyz` (was `prediction-market`) and its repository is
