@@ -43,6 +43,10 @@ A duty calls every command by its bare name (`["acp", "trade", ...]`, `bevo-wall
 never by an absolute path: the duty's own launchers on its PATH carry its session and wallet,
 so an absolute path would run without them (the wrong wallet, or no session at all).
 
+A duty runs these scripts and `acp` the way the duty-code skill shows and reads the answer from
+the result it gives back; it never parses either output by hand. `acp ... --json` puts `code` at
+the top and `error` is a sentence, while these scripts nest `error: {code, message, hint}`.
+
 ## Which wallet a run uses
 
 Every script prints `walletScope`. Before the first money step of a duty, read it: `duty` is
@@ -52,9 +56,11 @@ container decides the wallet, the skill only reports it.
 
 ## Waiting for a deposit
 
-After the deposit step, run `status.mjs --need <next step's amount>` and continue as soon as
-it no longer says `needs_deposit`. Never wait for the full amount sent to arrive: bridge and
-first-send fees mean it never does.
+Deposit once. Save the idempotency key in the duty's state before sending, then only read the
+venue status (`status.mjs --need <next step's amount>`) until it no longer says `needs_deposit`,
+and continue. Never deposit again: bridge and first-send fees mean the full amount sent never
+arrives. If unsure whether the deposit landed, wait and read; never resend with a new key or a
+new amount.
 
 ## Each tick
 

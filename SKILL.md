@@ -1,7 +1,7 @@
 ---
 name: outcome-xyz
 description: "Bet on Outcome.xyz prediction markets (Hyperliquid HIP-4): find markets, fund or withdraw from Hyperliquid, set up the trading key, place or cancel limit orders, read positions. Runs scripts."
-version: 2.3.0
+version: 2.3.1
 metadata: {"butler":{"moneyMoving":true,"venue":{"id":"outcomexyz","precheck":["node","scripts/venue.mjs","precheck"],"withdraw":["node","scripts/venue.mjs","withdraw"]},"portfolio":{"script":"scripts/portfolio.mjs","site":"https://outcome.xyz","name":"Outcome","chains":["evm"]},"keywords":["prediction market","outcome","outcome.xyz","HIP-4","hyperliquid prediction","bet on","buy yes","buy no","sell prediction","prediction positions","prediction balance","cancel prediction order","deposit hyperliquid","withdraw from hyperliquid","withdraw prediction","trading key"],"requires":{"bins":["acp","bevo-wallet","node","npm"]}}}
 ---
 
@@ -13,7 +13,7 @@ own wallet. Not this skill: Hyperliquid perps, Polymarket, sending money to anyo
 
 You only run this skill's scripts: never your own SDK code, never Hyperliquid directly,
 never a key. Each prints ONE JSON object `{ok, status, data, error:{code,message,hint}}`;
-act on `status` and `error.code`. Quote only this turn's output.
+act on `status` and `error.code`. `acp … --json` has a different shape (`code` at the top, `error` a sentence): never parse either by hand. Quote only this turn's output.
 
 ## Before you start
 
