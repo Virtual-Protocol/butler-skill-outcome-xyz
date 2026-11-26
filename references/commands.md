@@ -4,6 +4,7 @@ Every script is `node "${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market/script
 Run them only after the one-time `npm ci` in `SKILL.md`. Flags are `--name value`,
 `--name=value` or a bare boolean `--flag`; an unknown flag, a positional argument or a flag
 given twice is refused with `BAD_ARGS` (exit code 2). Any other failure exits 1, success 0.
+Every figure in an envelope (size, price, fee, PnL, balance) is a JSON number or `null`, never text.
 
 ## Output envelope
 

@@ -12,6 +12,7 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   MIN_ORDER_NOTIONAL,
+  num,
   SkillError,
   classifyAgentHealth,
   classifyCancelStatuses,
@@ -45,10 +46,6 @@ const ARG_SPEC = {
   cash: { type: "boolean" },
 };
 
-const num = (v) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-};
 
 export function emptyPrecheck() {
   return { venue: VENUE_ID, readable: true, reason: null, freeUsd: 0, inTransitUsd: 0, positions: [], orders: [], held: [] };

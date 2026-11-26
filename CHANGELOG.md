@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.2.1
+
+- Every figure a script prints is a JSON number or `null`: `place_bet` `filledShares`, `account`
+  orders and fills (`price`, `size`, `fee`) and positions, and `markets` `bestBid`/`bestAsk` used to
+  pass the exchange's strings (`"7.0"`) through, which crashed a duty comparing them with a number.
+  One `num()` in `lib/common.mjs` now serves every script.
+- `references/duty.md`: the default filing path sends `"autoExecute": true`; without it the duty
+  wallet's `ApproveAgent` raised a second owner card. A duty's closing note counts fills from
+  `account.mjs` or a ledger in `bevo.state`, never from a run's locals.
+
 ## 2.2.0
 
 - New `scripts/venue.mjs`, declared as `metadata.butler.venue` (id `outcome`) for duty-wallet teardown.

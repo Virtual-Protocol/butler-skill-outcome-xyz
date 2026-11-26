@@ -65,6 +65,8 @@ import {
   orderSubmitFailure,
   classifyCancelStatuses,
   isDuplicateCloidError,
+  orderStatusResult,
+  num,
 } from "../scripts/lib/common.mjs";
 import { mkdtempSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -980,4 +982,15 @@ test("deposit guidance points to acp's move into Hyperliquid first, sending at l
   assert.doesNotMatch(topUp.creditNote, /~1 USDC/);
   assert.match(topUp.creditNote, /never wait for the full amount/);
   assert.match(next.fallback, /deposit\.mjs --amount 5/);
+});
+
+test("orderStatusResult: filled size is a JSON number, never the exchange's string", () => {
+  assert.deepEqual(orderStatusResult({ filled: { oid: 7, totalSz: "7.0", avgPx: "0.73" } }), {
+    orderId: "7",
+    orderStatus: "filled",
+    filledShares: 7,
+  });
+  assert.equal(num(""), null);
+  assert.equal(num(null), null);
+  assert.equal(num("0.5"), 0.5);
 });

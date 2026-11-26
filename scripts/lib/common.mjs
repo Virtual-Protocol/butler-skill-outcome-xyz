@@ -897,6 +897,12 @@ export async function moveUsdcInAccount({ agent, trap, main, sourceDex, destinat
 
 const HL_TIF = { GTC: "Gtc", ALO: "Alo", FAK: "Ioc" };
 
+export const num = (v) => {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
 export function outcomeOrderWire({ assetId, side, price, size, tif = "GTC", cloid }) {
   const hlTif = HL_TIF[tif];
   if (!hlTif) throw badArgs("--tif must be GTC, ALO or FAK");
@@ -904,7 +910,7 @@ export function outcomeOrderWire({ assetId, side, price, size, tif = "GTC", cloi
 }
 
 export function orderStatusResult(status) {
-  if (status?.filled) return { orderId: String(status.filled.oid), orderStatus: "filled", filledShares: status.filled.totalSz ?? null };
+  if (status?.filled) return { orderId: String(status.filled.oid), orderStatus: "filled", filledShares: num(status.filled.totalSz) };
   if (status?.resting) return { orderId: String(status.resting.oid), orderStatus: "resting", filledShares: null };
   return { orderId: null, orderStatus: typeof status === "string" ? status : "unknown", filledShares: null };
 }
