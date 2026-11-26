@@ -329,6 +329,7 @@ test("venue precheck reports only # bets and their orders, with freeUsd 0", asyn
       { coin: "BTC", oid: 78, side: "B", limitPx: "90000", sz: "1" },
       { coin: "@107", oid: 79, side: "A", limitPx: "30", sz: "1" },
     ],
+    books: { "#291020": "0.49" },
   });
   const out = await precheckVenue({ address: WALLET }, { info: venue.info });
   assert.equal(out.venue, "outcome");
@@ -341,6 +342,31 @@ test("venue precheck reports only # bets and their orders, with freeUsd 0", asyn
     { key: "spot:#300010", title: "Outcome market 30001 (Yes)", valueUsd: 1 },
     { key: "spot:#999990", title: "Outcome market 99999 (Yes)", valueUsd: null },
   ]);
+});
+
+test("venue precheck holds a bet worth $2 at mid that sells under $2, or has no bid", async () => {
+  const venue = fakeVenueInfo({
+    balances: [
+      { coin: "+291020", total: "10", hold: "0" },
+      { coin: "+291021", total: "30", hold: "0" },
+      { coin: "+300010", total: "40", hold: "0" },
+    ],
+    mids: { "#291020": "0.21", "#291021": "0.5", "#300010": "0.5" },
+    books: { "#291020": "0.20", "#300010": "0.48" },
+  });
+  const out = await precheckVenue({ address: WALLET }, { info: venue.info });
+  assert.deepEqual(out.positions, [{ key: "spot:#300010", title: "Outcome market 30001 (Yes)", valueUsd: 20, closable: true }]);
+  assert.deepEqual(out.held, [
+    { key: "spot:#291020", title: "Bulgaria v Iceland (Yes)", valueUsd: 2.1 },
+    { key: "spot:#291021", title: "Bulgaria v Iceland (No)", valueUsd: 15 },
+  ]);
+  assert.equal(venue.calls.filter((t) => t === "l2Book").length, 3);
+
+  const signer = fakeVenueSigner();
+  const ex = fakeExchange(venue);
+  const w = await withdrawVenue({ walletId: VENUE_WALLET_ID, address: WALLET, mode: "all" }, venueDeps(venue, signer, ex));
+  assert.deepEqual(w.moved.map((m) => m.key), ["spot:#300010"]);
+  assert.deepEqual(w.kept.map((k) => [k.key, k.reason]), [["spot:#291020", "below_minimum"], ["spot:#291021", "not_closable"]]);
 });
 
 test("venue precheck: a Solana address is readable and empty, an HL error is unreadable", async () => {
@@ -381,7 +407,7 @@ test("venue withdraw refuses an unpinned or mismatched signer and sends nothing"
     const out = await withdrawVenue({ walletId: VENUE_WALLET_ID, address: WALLET, mode: "all" }, venueDeps(venue, signer, ex));
     assert.deepEqual(out.moved, []);
     assert.deepEqual(out.pending, []);
-    assert.deepEqual(out.kept.map((k) => [k.key, k.reason]), [["oid:77", "signer_not_pinned"], ["spot:#291020", "signer_not_pinned"]]);
+    assert.deepEqual(out.kept.map((k) => [k.key, k.reason]), [["oid:77", "refused"], ["spot:#291020", "refused"]]);
     assert.deepEqual(ex.calls, []);
     assert.equal(signer.calls.agentKey.length, 0);
     assert.equal(signer.calls.mainSigner, 0);

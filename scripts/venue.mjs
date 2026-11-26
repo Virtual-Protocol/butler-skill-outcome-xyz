@@ -142,19 +142,39 @@ export async function readOutcomeState(address, { info = hlInfo } = {}) {
   return { balances, orders: open };
 }
 
-export function classifyBalance(b) {
-  if (b.mid === null || !(b.mid > 0)) return { held: true, valueUsd: null };
-  const valueUsd = round6(b.total * b.mid);
-  return { held: valueUsd < MIN_ORDER_NOTIONAL, valueUsd };
+export function markUsd(b) {
+  return b.mid !== null && b.mid > 0 ? round6(b.total * b.mid) : null;
 }
 
-export function toPrecheck(state) {
+async function bestBid(coin, info) {
+  const book = await info({ type: "l2Book", coin });
+  return num(book?.levels?.[0]?.[0]?.px);
+}
+
+export async function sellQuote(b, info) {
+  const size = Math.floor(b.free);
+  if (size <= 0) return { sellable: false, reason: "below_minimum", size, price: 0, notional: 0 };
+  let bid;
+  try {
+    bid = await bestBid(b.coin, info);
+  } catch {
+    bid = null;
+  }
+  const price = bid !== null ? sellPrice(bid) : 0;
+  if (!(price > 0)) return { sellable: false, reason: "not_closable", size, price: 0, notional: 0 };
+  const notional = round6(size * price);
+  if (notional < MIN_ORDER_NOTIONAL) return { sellable: false, reason: "below_minimum", size, price, notional };
+  return { sellable: true, reason: null, size, price, notional };
+}
+
+export async function toPrecheck(state, { info = hlInfo } = {}) {
   const out = emptyPrecheck();
   for (const b of state.balances) {
-    const { held, valueUsd } = classifyBalance(b);
+    const { sellable } = await sellQuote(b, info);
     const key = `spot:${b.coin}`;
-    if (held) out.held.push({ key, title: b.title, valueUsd });
-    else out.positions.push({ key, title: b.title, valueUsd, closable: true });
+    const valueUsd = markUsd(b);
+    if (sellable) out.positions.push({ key, title: b.title, valueUsd, closable: true });
+    else out.held.push({ key, title: b.title, valueUsd });
   }
   out.held = out.held.slice(0, MAX_HELD);
   out.orders = state.orders.map((o) => ({ key: `oid:${o.oid}`, title: o.title, reservedUsd: o.reservedUsd }));
@@ -166,7 +186,7 @@ export async function precheck({ address }, deps = {}) {
   if (kind === "solana") return emptyPrecheck();
   if (kind !== "evm") return unreadablePrecheck("--address must be a 0x or Solana address");
   try {
-    return toPrecheck(await readOutcomeState(address, deps));
+    return await toPrecheck(await readOutcomeState(address, deps), deps);
   } catch (err) {
     return unreadablePrecheck(`Hyperliquid read failed: ${err?.message ?? err}`);
   }
@@ -175,7 +195,7 @@ export async function precheck({ address }, deps = {}) {
 function keptEverything(state, reason) {
   return [
     ...state.orders.map((o) => ({ key: `oid:${o.oid}`, title: o.title, valueUsd: o.reservedUsd ?? 0, reason })),
-    ...state.balances.map((b) => ({ key: `spot:${b.coin}`, title: b.title, valueUsd: classifyBalance(b).valueUsd ?? 0, reason })),
+    ...state.balances.map((b) => ({ key: `spot:${b.coin}`, title: b.title, valueUsd: markUsd(b) ?? 0, reason })),
   ];
 }
 
@@ -220,36 +240,15 @@ async function cancelOrders(exchange, orders, assetIdOf) {
   return { moved, kept };
 }
 
-async function bestBid(coin, info) {
-  const book = await info({ type: "l2Book", coin });
-  return num(book?.levels?.[0]?.[0]?.px);
-}
-
 async function sellAll({ balances, agent, trap, exchange, address, walletId, info, assetIdOf, formatPrice, now }) {
   const moved = [];
   const kept = [];
   for (const b of balances) {
     const key = `spot:${b.coin}`;
-    const size = Math.floor(b.free);
-    const markValue = b.mid !== null ? round6(b.total * b.mid) : 0;
-    if (size <= 0) {
-      kept.push({ key, title: b.title, valueUsd: markValue, reason: "below_minimum" });
-      continue;
-    }
-    let bid;
-    try {
-      bid = await bestBid(b.coin, info);
-    } catch {
-      bid = null;
-    }
-    const price = bid !== null ? sellPrice(bid) : 0;
-    if (!(price > 0)) {
-      kept.push({ key, title: b.title, valueUsd: markValue, reason: "not_closable" });
-      continue;
-    }
-    const notional = round6(size * price);
-    if (notional < MIN_ORDER_NOTIONAL) {
-      kept.push({ key, title: b.title, valueUsd: markValue || notional, reason: "below_minimum" });
+    const markValue = markUsd(b) ?? 0;
+    const { sellable, reason, size, price, notional } = await sellQuote(b, info);
+    if (!sellable) {
+      kept.push({ key, title: b.title, valueUsd: markValue || notional, reason });
       continue;
     }
     const wire = outcomeOrderWire({
@@ -304,8 +303,9 @@ export async function withdraw({ walletId, address, mode }, deps = {}) {
     state = null;
   }
   if (!pinned) {
-    const kept = state ? keptEverything(state, "signer_not_pinned") : [];
-    if (kept.length === 0) kept.push({ key: "signer", title: "Outcome teardown", valueUsd: 0, reason: "signer_not_pinned" });
+    console.error(`[prediction-market] venue withdraw refused: ${signerMod ? "signer not pinned, or its pinned wallet does not match --walletid/--address" : "signer unavailable"}`);
+    const kept = state ? keptEverything(state, "refused") : [];
+    if (kept.length === 0) kept.push({ key: "signer", title: "Outcome teardown", valueUsd: 0, reason: "refused" });
     return withdrawResult(mode, { kept });
   }
   if (!state) return withdrawResult(mode, { kept: [{ key: "venue", title: "Outcome", valueUsd: 0, reason: "unreadable" }] });
@@ -326,7 +326,7 @@ export async function withdraw({ walletId, address, mode }, deps = {}) {
   const exchange = deps.exchange ?? (await agentExchange(agent, trap));
   const cancelled = await cancelOrders(exchange, state.orders, assetIdOf);
   if (mode === "cash") {
-    const positions = state.balances.map((b) => ({ key: `spot:${b.coin}`, title: b.title, valueUsd: classifyBalance(b).valueUsd ?? 0, reason: "position_kept" }));
+    const positions = state.balances.map((b) => ({ key: `spot:${b.coin}`, title: b.title, valueUsd: markUsd(b) ?? 0, reason: "position_kept" }));
     return withdrawResult(mode, { moved: cancelled.moved, kept: [...cancelled.kept, ...positions] });
   }
   let balances = state.balances;

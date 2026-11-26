@@ -5,16 +5,18 @@
 - New `scripts/venue.mjs`, declared as `metadata.butler.venue` (id `outcome`) for duty-wallet teardown.
   - `precheck` reads by `--address` only (no signer, no installed package): Outcome (`#`) bets as
     positions keyed `spot:#<coin>` and their open orders keyed `oid:<oid>`; `freeUsd` and
-    `inTransitUsd` are always 0 (the cash belongs to the Hyperliquid account). A bet with no live mid
-    or worth under the $2 order minimum is reported in `held`. A Solana address is readable and empty;
-    a Hyperliquid error is `readable:false`.
-  - `withdraw` refuses (everything `kept`, reason `signer_not_pinned`) unless the signer's
+    `inTransitUsd` are always 0 (the cash belongs to the Hyperliquid account). Unsellable bets are
+    held: precheck and withdraw share one rule, so a bet is a closable position only when its book
+    has a bid and floor(free shares) x the sell price reaches the $2 order minimum; any other bet is
+    reported in `held` (valued at mid, or null) and never blocks teardown. A Solana address is
+    readable and empty; a Hyperliquid error is `readable:false`.
+  - `withdraw` refuses (everything `kept`, reason `refused`, detail on stderr) unless the signer's
     `pinnedWallet()` equals `--walletid` and `--address`. It uses only the stored trading key
     (`agentKey` with `create:false`), never the main wallet signer, and never transfers. `--cash`
     cancels every open Outcome order; `--all` also sells each bet with one IOC at best bid x 0.95
     (`SELL_SLIPPAGE`), rounded down to the price grid. Unfilled is `close_failed`, under $2 is
-    `below_minimum`. Client order ids derive from the wallet id, coin, size and a 10-minute window, so a
-    re-run does not double-place.
+    `below_minimum`, no bid is `not_closable`. Client order ids derive from the wallet id, coin, size
+    and a 10-minute window, so a re-run does not double-place.
 - `placeOutcomeOrder` accepts an injected `exchange` (tests).
 
 ## 2.1.1
