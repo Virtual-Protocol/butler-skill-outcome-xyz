@@ -7,7 +7,7 @@ perps and spot; it can never withdraw.
 
 ## The vault item
 
-- Name `outcome.<wallet>`: the label `outcome` plus the signing wallet, an EVM address
+- Name `outcomexyz.<wallet>`: the label `outcomexyz` plus the signing wallet, an EVM address
   lowercased with its `0x`. One item per wallet, so a duty's own wallet and the owner's main
   wallet each have their own key.
 - Kind `venue_credentials`; display label like `outcome · 0x6dcf…beac` (first 6 and last 4

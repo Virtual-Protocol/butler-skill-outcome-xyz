@@ -8,7 +8,7 @@
 //
 // marketId = the outcomeId string. Outcome.xyz's own markets have venue "out".
 
-import { runScript, parseArgs, okEnvelope, createHip4, SkillError } from "./lib/common.mjs";
+import { runScript, parseArgs, okEnvelope, createHip4, SkillError, num } from "./lib/common.mjs";
 
 const TYPES = new Set(["defaultBinary", "labelledBinary", "multiOutcome", "priceBucket"]);
 
@@ -50,8 +50,8 @@ runScript(async () => {
       const row = toRow(m, mids, sdk);
       row.sides.forEach((s, i) => {
         const b = books[i];
-        s.bestBid = b?.bids?.[0]?.price ?? null;
-        s.bestAsk = b?.asks?.[0]?.price ?? null;
+        s.bestBid = num(b?.bids?.[0]?.price);
+        s.bestAsk = num(b?.asks?.[0]?.price);
         s.book = b ? { bids: b.bids.slice(0, 5), asks: b.asks.slice(0, 5) } : null;
       });
       return okEnvelope("done", { market: row });

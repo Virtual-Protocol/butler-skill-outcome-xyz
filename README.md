@@ -1,4 +1,4 @@
-# butler-skill-prediction-market
+# butler-skill-outcome-xyz
 
 Butler skill for Outcome.xyz prediction markets (Hyperliquid HIP-4). This repository is the
 **only** place Butler learns Outcome.xyz and Hyperliquid: bevo-server and the container hold

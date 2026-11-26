@@ -5,8 +5,14 @@ scripts as chat. Read this before filing one.
 
 ## Funding the duty wallet
 
-**Default (acp available):** file the duty with its own new wallet (`"wallet": "new"`) and its
-built-in funding card (`fundUsdc`, USDC on Base). That is one owner card. A duty wallet is
+**Always send `"autoExecute": true` on the `duty_create` itself**, on both paths below. Without it
+the duty wallet's first Hyperliquid signature (the trading key's `ApproveAgent`) waits on a second
+owner card, and it can never be turned on later without one. Tell the owner, when you propose the
+duty, that it signs its own Hyperliquid steps from its own wallet; their yes to the duty is the
+say-so.
+
+**Default (acp available):** file the duty with its own new wallet (`"wallet": "new"`), its
+built-in funding card (`fundUsdc`, USDC on Base) and `"autoExecute": true`. That is one owner card. A duty wallet is
 new to Hyperliquid, so its first acp deposit loses about 1.2 USDC (bridge plus a likely
 first-send fee): size the card at least the bets + 1.5, never under 5.5. The duty's deposit step (SKILL.md step 2, `acp trade … --chain-out 1337`) runs
 in the duty's session, so it pulls the duty wallet's USDC from whatever chain holds it (Base
@@ -27,6 +33,11 @@ on Arbitrum One (chain 42161), and the built-in card funds Base. So:
 Tell the owner which cards they will see before the first one.
 
 ## Calling commands from a duty
+
+Every figure the scripts print in `--json` (sizes, prices, fees, `filledShares`, balances) is a
+JSON number or `null`, never text. A duty still `float()`s a figure before comparing it, and its
+closing note counts fills from `account.mjs` (or a ledger saved in `bevo.state` before each
+order), never from a run's own locals, which a crash loses.
 
 A duty calls every command by its bare name (`["acp", "trade", ...]`, `bevo-wallet`, `node`),
 never by an absolute path: the duty's own launchers on its PATH carry its session and wallet,

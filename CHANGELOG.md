@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.3.0
+
+- Renamed: the skill is `outcome-xyz` (was `prediction-market`) and its repository is
+  `Virtual-Protocol/butler-skill-outcome-xyz`. Its scripts now live under
+  `$BEVO_SKILLS_DIR/outcome-xyz/scripts/`, and its pending store under `$HOME/.cache/outcome-xyz/`.
+- The teardown venue id is `outcomexyz` (was `outcome`).
+- The trading key's vault item is `outcomexyz.<wallet>` (was `outcome.<wallet>`). A key stored
+  under the old name is not found: the wallet approves a new trading key once (one `ApproveAgent`).
+
+- Every figure a script prints is a JSON number or `null`: `place_bet` `filledShares`, `account`
+  orders and fills (`price`, `size`, `fee`) and positions, and `markets` `bestBid`/`bestAsk` used to
+  pass the exchange's strings (`"7.0"`) through, which crashed a duty comparing them with a number.
+  One `num()` in `lib/common.mjs` now serves every script.
+- `references/duty.md`: the default filing path sends `"autoExecute": true`; without it the duty
+  wallet's `ApproveAgent` raised a second owner card. A duty's closing note counts fills from
+  `account.mjs` or a ledger in `bevo.state`, never from a run's locals.
+
 ## 2.2.0
 
 - New `scripts/venue.mjs`, declared as `metadata.butler.venue` (id `outcome`) for duty-wallet teardown.

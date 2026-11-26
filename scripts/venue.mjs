@@ -12,6 +12,7 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   MIN_ORDER_NOTIONAL,
+  num,
   SkillError,
   classifyAgentHealth,
   classifyCancelStatuses,
@@ -28,7 +29,7 @@ import {
   toJson,
 } from "./lib/common.mjs";
 
-export const VENUE_ID = "outcome";
+export const VENUE_ID = "outcomexyz";
 export const SELL_SLIPPAGE = 0.05;
 export const RUN_WINDOW_MS = 600_000;
 export const MAX_HELD = 200;
@@ -45,10 +46,6 @@ const ARG_SPEC = {
   cash: { type: "boolean" },
 };
 
-const num = (v) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-};
 
 export function emptyPrecheck() {
   return { venue: VENUE_ID, readable: true, reason: null, freeUsd: 0, inTransitUsd: 0, positions: [], orders: [], held: [] };
@@ -264,7 +261,7 @@ async function sellAll({ balances, agent, trap, exchange, address, walletId, inf
       const res = await placeOutcomeOrder({ agent, trap, main: address, wire, info, exchange });
       if (res.orderStatus === "filled") filled = Math.min(size, num(res.filledShares) ?? size);
     } catch (err) {
-      console.error(`[prediction-market] venue sell ${b.coin} failed: ${err?.code ?? ""} ${err?.message ?? err}`);
+      console.error(`[outcome-xyz] venue sell ${b.coin} failed: ${err?.code ?? ""} ${err?.message ?? err}`);
     }
     if (filled > 0) moved.push({ key, title: b.title, valueUsd: round6(filled * price), txHash: null });
     if (filled < size) kept.push({ key, title: b.title, valueUsd: round6((size - filled) * (b.mid ?? price)), reason: "close_failed" });
@@ -293,7 +290,7 @@ export async function withdraw({ walletId, address, mode }, deps = {}) {
   try {
     signerMod = deps.signerMod ?? (await (deps.loadSigner ?? loadSigner)());
   } catch (err) {
-    console.error(`[prediction-market] venue signer unavailable: ${err?.code ?? ""} ${err?.message ?? err}`);
+    console.error(`[outcome-xyz] venue signer unavailable: ${err?.code ?? ""} ${err?.message ?? err}`);
   }
   const pinned = kind === "evm" && signerMod ? await pinMatches(signerMod, { walletId, address }).catch(() => false) : false;
   let state;
@@ -303,7 +300,7 @@ export async function withdraw({ walletId, address, mode }, deps = {}) {
     state = null;
   }
   if (!pinned) {
-    console.error(`[prediction-market] venue withdraw refused: ${signerMod ? "signer not pinned, or its pinned wallet does not match --walletid/--address" : "signer unavailable"}`);
+    console.error(`[outcome-xyz] venue withdraw refused: ${signerMod ? "signer not pinned, or its pinned wallet does not match --walletid/--address" : "signer unavailable"}`);
     const kept = state ? keptEverything(state, "refused") : [];
     if (kept.length === 0) kept.push({ key: "signer", title: "Outcome teardown", valueUsd: 0, reason: "refused" });
     return withdrawResult(mode, { kept });
@@ -317,7 +314,7 @@ export async function withdraw({ walletId, address, mode }, deps = {}) {
   try {
     agent = await usableAgent(signerMod, address, info);
   } catch (err) {
-    console.error(`[prediction-market] venue trading key unavailable: ${err?.code ?? ""} ${err?.message ?? err}`);
+    console.error(`[outcome-xyz] venue trading key unavailable: ${err?.code ?? ""} ${err?.message ?? err}`);
   }
   if (!agent) return withdrawResult(mode, { kept: keptEverything(state, "refused") });
 

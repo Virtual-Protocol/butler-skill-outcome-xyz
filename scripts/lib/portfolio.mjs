@@ -1,4 +1,4 @@
-import { SkillError, createHip4, readHlBalances, outcomeCatalog, round6 } from "./common.mjs";
+import { SkillError, createHip4, readHlBalances, outcomeCatalog, round6, num } from "./common.mjs";
 
 export const MAX_POSITIONS = 50;
 export const MAX_ORDERS = 50;
@@ -51,10 +51,6 @@ async function catalogFor(hip4, deps) {
   return outcomeCatalog(markets, parseSideCoin);
 }
 
-const num = (v) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-};
 
 export function toPosition(p, describe) {
   const size = num(p.shares) ?? 0;

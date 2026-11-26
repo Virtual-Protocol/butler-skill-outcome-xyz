@@ -1,4 +1,4 @@
-// Shared helpers for the prediction-market skill scripts.
+// Shared helpers for the outcome-xyz skill scripts.
 //
 // Contract every script follows:
 //   - prints exactly ONE JSON object on stdout:
@@ -67,8 +67,8 @@ export const DEV_MAX_NOTIONAL = 10;
 export const AGENT_EXPIRY_WARN_DAYS = 14;
 /** Agent approvals with less than this left must be rotated (mustRotate). */
 export const AGENT_ROTATE_DAYS = 7;
-/** Vault label of this skill's agent key: the item is named outcome.<wallet>. */
-export const AGENT_KEY_LABEL = "outcome";
+/** Vault label of this skill's agent key: the item is named outcomexyz.<wallet>. */
+export const AGENT_KEY_LABEL = "outcomexyz";
 /** Hyperliquid agent name used in production. Re-approving the same name replaces the old agent. */
 export const PROD_AGENT_NAME = "Butler";
 /** Dev default, so local tests never replace the production "Butler" agent. */
@@ -272,7 +272,7 @@ export function parseArgs(argv, spec) {
   for (let i = 0; i < argv.length; i++) {
     const tok = argv[i];
     if (tok === LEGACY_DUTY_FLAG || tok.startsWith(`${LEGACY_DUTY_FLAG}=`)) {
-      if (!legacyNoted) console.error("[prediction-market] --sign-by-duty-wallet is ignored: the server picks the wallet from the session.");
+      if (!legacyNoted) console.error("[outcome-xyz] --sign-by-duty-wallet is ignored: the server picks the wallet from the session.");
       legacyNoted = true;
       continue;
     }
@@ -460,7 +460,7 @@ export async function assertKeyFresh(signerMod, key, { route = "execute", resume
 }
 
 export function orderCloid(script, key, leg = null) {
-  const parts = ["prediction-market", script, key];
+  const parts = ["outcome-xyz", script, key];
   if (leg !== null && leg !== undefined) parts.push(String(leg));
   return `0x${createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 32)}`;
 }
@@ -897,6 +897,12 @@ export async function moveUsdcInAccount({ agent, trap, main, sourceDex, destinat
 
 const HL_TIF = { GTC: "Gtc", ALO: "Alo", FAK: "Ioc" };
 
+export const num = (v) => {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
 export function outcomeOrderWire({ assetId, side, price, size, tif = "GTC", cloid }) {
   const hlTif = HL_TIF[tif];
   if (!hlTif) throw badArgs("--tif must be GTC, ALO or FAK");
@@ -904,7 +910,7 @@ export function outcomeOrderWire({ assetId, side, price, size, tif = "GTC", cloi
 }
 
 export function orderStatusResult(status) {
-  if (status?.filled) return { orderId: String(status.filled.oid), orderStatus: "filled", filledShares: status.filled.totalSz ?? null };
+  if (status?.filled) return { orderId: String(status.filled.oid), orderStatus: "filled", filledShares: num(status.filled.totalSz) };
   if (status?.resting) return { orderId: String(status.resting.oid), orderStatus: "resting", filledShares: null };
   return { orderId: null, orderStatus: typeof status === "string" ? status : "unknown", filledShares: null };
 }
@@ -953,11 +959,11 @@ export function classifyCancelStatuses(targets, statuses) {
 }
 
 // ---------------------------------------------------------------------------
-// Pending main-wallet steps (resumable): $HOME/.cache/prediction-market/pending/<key>.json
+// Pending main-wallet steps (resumable): $HOME/.cache/outcome-xyz/pending/<key>.json
 // ---------------------------------------------------------------------------
 
 export function pendingDir() {
-  return join(process.env.HOME || homedir(), ".cache", "prediction-market", "pending");
+  return join(process.env.HOME || homedir(), ".cache", "outcome-xyz", "pending");
 }
 
 function pendingPath(key) {

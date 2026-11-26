@@ -1,8 +1,8 @@
 ---
-name: prediction-market
+name: outcome-xyz
 description: "Bet on Outcome.xyz prediction markets (Hyperliquid HIP-4): find markets, fund or withdraw from Hyperliquid, set up the trading key, place or cancel limit orders, read positions. Runs scripts."
-version: 2.2.0
-metadata: {"butler":{"moneyMoving":true,"venue":{"id":"outcome","precheck":["node","scripts/venue.mjs","precheck"],"withdraw":["node","scripts/venue.mjs","withdraw"]},"portfolio":{"script":"scripts/portfolio.mjs","site":"https://outcome.xyz","name":"Outcome","chains":["evm"]},"keywords":["prediction market","outcome","outcome.xyz","HIP-4","hyperliquid prediction","bet on","buy yes","buy no","sell prediction","prediction positions","prediction balance","cancel prediction order","deposit hyperliquid","withdraw from hyperliquid","withdraw prediction","trading key"],"requires":{"bins":["acp","bevo-wallet","node","npm"]}}}
+version: 2.3.0
+metadata: {"butler":{"moneyMoving":true,"venue":{"id":"outcomexyz","precheck":["node","scripts/venue.mjs","precheck"],"withdraw":["node","scripts/venue.mjs","withdraw"]},"portfolio":{"script":"scripts/portfolio.mjs","site":"https://outcome.xyz","name":"Outcome","chains":["evm"]},"keywords":["prediction market","outcome","outcome.xyz","HIP-4","hyperliquid prediction","bet on","buy yes","buy no","sell prediction","prediction positions","prediction balance","cancel prediction order","deposit hyperliquid","withdraw from hyperliquid","withdraw prediction","trading key"],"requires":{"bins":["acp","bevo-wallet","node","npm"]}}}
 ---
 
 ## When to use
@@ -20,11 +20,11 @@ act on `status` and `error.code`. Quote only this turn's output.
 **Install once.** Needs Node 22.12+. This checks and installs only when missing:
 
 ```sh
-cd "${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market" && { npm ls --depth=0 >/dev/null 2>&1 || npm ci --omit=dev --ignore-scripts --no-audit --no-fund; }
+cd "${BEVO_SKILLS_DIR:-$HOME/skills}/outcome-xyz" && { npm ls --depth=0 >/dev/null 2>&1 || npm ci --omit=dev --ignore-scripts --no-audit --no-fund; }
 ```
 
 If it fails, say so and stop. Scripts live at
-`${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market/scripts/`; write that path out in full
+`${BEVO_SKILLS_DIR:-$HOME/skills}/outcome-xyz/scripts/`; write that path out in full
 in every command. The scripts: `scripts/status.mjs`, `scripts/markets.mjs`,
 `scripts/account.mjs`, `scripts/setup_agent.mjs`, `scripts/deposit.mjs`,
 `scripts/ensure_spot.mjs`, `scripts/ensure_perps.mjs`, `scripts/withdraw.mjs`,
@@ -58,7 +58,7 @@ A card step waits ~1.5 min: tell your owner BEFORE you run it. Per script:
 1. [FIXED] **Status first, every errand.** Pass the order cost as `--need`:
 
    ```sh
-   node "${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market/scripts/status.mjs" --need 20
+   node "${BEVO_SKILLS_DIR:-$HOME/skills}/outcome-xyz/scripts/status.mjs" --need 20
    ```
 
    `data.next.status`: `needs_deposit` → step 2 with `next.suggestedDepositUsdc`;
@@ -83,8 +83,8 @@ A card step waits ~1.5 min: tell your owner BEFORE you run it. Per script:
 3. [FIXED] **Set up, repair or renew the trading key** (needs a prior deposit):
 
    ```sh
-   node "${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market/scripts/setup_agent.mjs" --idempotency-key pm-key-1119-1031
-   node "${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market/scripts/setup_agent.mjs" --rotate --idempotency-key pm-key-1119-1031
+   node "${BEVO_SKILLS_DIR:-$HOME/skills}/outcome-xyz/scripts/setup_agent.mjs" --idempotency-key pm-key-1119-1031
+   node "${BEVO_SKILLS_DIR:-$HOME/skills}/outcome-xyz/scripts/setup_agent.mjs" --rotate --idempotency-key pm-key-1119-1031
    ```
 
    Run ONE. Plain: a listed key → `alreadyApproved: true`; none or invalid → a fresh key, one
@@ -93,14 +93,14 @@ A card step waits ~1.5 min: tell your owner BEFORE you run it. Per script:
 4. [FIXED] **Spot USDC** (bets spend spot; moves only the gap from perps):
 
    ```sh
-   node "${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market/scripts/ensure_spot.mjs" --amount 20 --idempotency-key pm-spot-1119-1032
+   node "${BEVO_SKILLS_DIR:-$HOME/skills}/outcome-xyz/scripts/ensure_spot.mjs" --amount 20 --idempotency-key pm-spot-1119-1032
    ```
 
 5. [ADAPT] **Find the market and price.** Search 1–2 plain words; `--venue all` if Outcome's
    own (`out`) has nothing:
 
    ```sh
-   node "${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market/scripts/markets.mjs" --venue out --query btc
+   node "${BEVO_SKILLS_DIR:-$HOME/skills}/outcome-xyz/scripts/markets.mjs" --venue out --query btc
    ```
 
    Then `markets.mjs --id 37348` gives `sides[].bestBid` / `bestAsk`. Shares = floor(budget ÷
@@ -109,7 +109,7 @@ A card step waits ~1.5 min: tell your owner BEFORE you run it. Per script:
 6. [FIXED] **Place one limit order** (`--outcome YES|NO`, `--side buy|sell`):
 
    ```sh
-   node "${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market/scripts/place_bet.mjs" --market 37348 --outcome YES --side buy --size 40 --price 0.47 --idempotency-key pm-bet-1119-1033
+   node "${BEVO_SKILLS_DIR:-$HOME/skills}/outcome-xyz/scripts/place_bet.mjs" --market 37348 --outcome YES --side buy --size 40 --price 0.47 --idempotency-key pm-bet-1119-1033
    ```
 
    Fill now: best ask (buy) / best bid (sell) plus `--tif FAK`; default GTC rests. Selling
@@ -118,7 +118,7 @@ A card step waits ~1.5 min: tell your owner BEFORE you run it. Per script:
 7. [FIXED] **Cancel** one order (id from `account.mjs`); `--all` cancels every one:
 
    ```sh
-   node "${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market/scripts/cancel.mjs" --order-id 123456789 --idempotency-key pm-cxl-1119-1034
+   node "${BEVO_SKILLS_DIR:-$HOME/skills}/outcome-xyz/scripts/cancel.mjs" --order-id 123456789 --idempotency-key pm-cxl-1119-1034
    ```
 
 8. [ADAPT] **Account** (positions, orders, fills, settled): `.../scripts/account.mjs --days 7`
@@ -128,7 +128,7 @@ A card step waits ~1.5 min: tell your owner BEFORE you run it. Per script:
    `--all` for everything:
 
    ```sh
-   node "${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market/scripts/withdraw.mjs" --amount 20 --idempotency-key pm-wd-1119-1036
+   node "${BEVO_SKILLS_DIR:-$HOME/skills}/outcome-xyz/scripts/withdraw.mjs" --amount 20 --idempotency-key pm-wd-1119-1036
    ```
 
    `withdraw_pending` → ~5 minutes. `needs_perps` → `ensure_perps.mjs --amount
@@ -137,7 +137,7 @@ A card step waits ~1.5 min: tell your owner BEFORE you run it. Per script:
 10. [FIXED] **Retire the trading key** (withdrawal landed, no orders open):
 
     ```sh
-    node "${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market/scripts/revoke_agent.mjs" --idempotency-key pm-rev-1119-1040
+    node "${BEVO_SKILLS_DIR:-$HOME/skills}/outcome-xyz/scripts/revoke_agent.mjs" --idempotency-key pm-rev-1119-1040
     ```
 
     A throwaway approval stays under our name (`placeholder: true`) until the next setup
@@ -159,7 +159,7 @@ printed but the JSON envelope; the exit code is always 0, so act on `ok` and `st
 | `portfolio.mjs balances --address 0x...` | Hyperliquid spot USDC (chat only, not in the full portfolio) |
 
 ```sh
-node "${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market/scripts/portfolio.mjs" --address "$WALLET"
+node "${BEVO_SKILLS_DIR:-$HOME/skills}/outcome-xyz/scripts/portfolio.mjs" --address "$WALLET"
 ```
 
 The Butler's sync also passes `--walletid <walletId>` for a Butler wallet; the read uses
@@ -182,8 +182,8 @@ wallet>` and quote this turn's output; for orders or cash run `orders` or `balan
 
 ### Duty usage
 
-File it with its own new wallet; its funding card (USDC on Base) is fine, step 2 deposits
-from any chain. Each tick: status, then place_bet or cancel with the slot key.
+File it with its own new wallet and `"autoExecute": true` (`references/duty.md`); its funding
+card (USDC on Base) is fine, step 2 deposits from any chain. Each tick: status, then place_bet or cancel with the slot key.
 `walletScope: "main"` before the first money step: say in the duty's first note that it
 trades the owner's main wallet.
 Run the close sweep BEFORE the duty is deleted: `references/duty.md`.

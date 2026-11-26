@@ -8,7 +8,7 @@
 // Settlement is read with client.fetchSettledOutcome (event status is almost
 // always "active" and cannot be trusted). Winning shares auto-redeem to USDC.
 
-import { runScript, parseArgs, okEnvelope, loadSigner, createHip4, readHlBalances, outcomeCatalog, settledNames, SkillError } from "./lib/common.mjs";
+import { runScript, parseArgs, okEnvelope, loadSigner, createHip4, readHlBalances, outcomeCatalog, settledNames, SkillError, num } from "./lib/common.mjs";
 
 const MAX_SETTLED_LOOKUPS = 15;
 
@@ -47,12 +47,12 @@ runScript(async () => {
 
     const outcomeOrders = openOrders
       .filter((o) => isOutcomeCoin(o.coin))
-      .map((o) => ({ orderId: String(o.oid), coin: o.coin, ...describe(o.coin), side: o.side === "B" ? "buy" : "sell", price: o.limitPx, size: o.sz, placedAt: new Date(o.timestamp).toISOString() }));
+      .map((o) => ({ orderId: String(o.oid), coin: o.coin, ...describe(o.coin), side: o.side === "B" ? "buy" : "sell", price: num(o.limitPx), size: num(o.sz), placedAt: new Date(o.timestamp).toISOString() }));
 
     const outcomeFills = fills
       .filter((f) => isOutcomeCoin(f.coin))
       .sort((a, b) => b.time - a.time)
-      .map((f) => ({ coin: f.coin, ...describe(f.coin), side: f.side === "B" ? "buy" : "sell", price: f.px, size: f.sz, fee: f.fee, orderId: String(f.oid), time: new Date(f.time).toISOString() }));
+      .map((f) => ({ coin: f.coin, ...describe(f.coin), side: f.side === "B" ? "buy" : "sell", price: num(f.px), size: num(f.sz), fee: num(f.fee), orderId: String(f.oid), time: new Date(f.time).toISOString() }));
 
     // Settlement check for markets we traded or hold that are no longer listed live.
     const ids = new Set();
@@ -83,11 +83,11 @@ runScript(async () => {
         outcome: describe(p.outcome).outcome,
         side: p.parsedOutcomeName || p.outcomeName,
         coin: `#${String(p.outcome).slice(1)}`,
-        shares: p.shares,
-        avgCost: p.avgCost,
-        currentPrice: p.currentPrice,
-        unrealizedPnl: p.unrealizedPnl,
-        payoutIfWins: p.potentialPayout,
+        shares: num(p.shares),
+        avgCost: num(p.avgCost),
+        currentPrice: num(p.currentPrice),
+        unrealizedPnl: num(p.unrealizedPnl),
+        payoutIfWins: num(p.potentialPayout),
       })),
       openOrders: outcomeOrders,
       recentFills: outcomeFills.slice(0, 20),

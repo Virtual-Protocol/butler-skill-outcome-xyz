@@ -11,7 +11,7 @@
 // rather than polling for minutes: run status.mjs a minute later.
 // Gas: with the dev signer the main wallet pays ETH (NEEDS_GAS); in production the
 // paymaster takes Arbitrum gas in USDC, so amount + DEPOSIT_USDC_HEADROOM is required.
-// Resumable: the step is saved to $HOME/.cache/prediction-market/pending/<key>.json and the
+// Resumable: the step is saved to $HOME/.cache/outcome-xyz/pending/<key>.json and the
 // signer call is repeated with the SAME idempotency key, so the signer returns the original
 // result instead of sending a second transfer. Never start a NEW deposit after deposit_pending.
 
