@@ -25,7 +25,8 @@ private vault (`references/credentials.md`).
 
 Flow: `status` → `deposit` → `setup_agent [--rotate]` → `ensure_spot` → `place_bet` /
 `cancel`; exit: `withdraw` (to the same wallet; `ensure_perps` first when the money sits
-in spot), then `revoke_agent`; reads `markets`, `account`. Needs a container whose signer
+in spot), then `revoke_agent`; reads `markets`, `account`, `portfolio`. Duty-wallet teardown: `venue`
+(`precheck` / `withdraw`), run by the Butler. Needs a container whose signer
 exports `AGENT_KEY_STORE = 'vault'` (else `SIGNER_OUTDATED`). Unit tests (no network): `npm test`.
 
 ## Publishing notes
