@@ -9,19 +9,21 @@
 //   - locates its own files via import.meta.url, never ~/skills/... (a duty runs
 //     with HOME = its duty dir; production also injects BEVO_SKILLS_DIR).
 //
-// Signer contract (architect review section 3, plus extensions marked EXT):
-//   mainSigner({ idempotencyKey })
-//     -> { address, signTypedData(...) -> 0x, sendTransaction({chainId,to,data,value}) -> { hash|null, status } }
-//   agentKey({ label, rotate, idempotencyKey, create /*EXT, default true*/ })
-//     -> { id, label, address, signerWallet, approved, generated, getAddress(), signTypedData(...),
-//          toViemAccount(), markApproved(), pending } | null (only when create:false and no key)
+// Signer contract (virtuals-agent docs/skills-contract.md):
+//   mainSigner({ idempotencyKey, deadline, approval })
+//     -> { address, walletScope, approval, signTypedData(...) -> 0x, sendTransaction({chainId,to,data,value}) -> { hash|null, status } }
+//   agentKey({ label, accounts, rotate, create, agentName, deadline })
+//     -> { id, label, address, signerWallet, approval, agentName, createdAt, approvedAt, validUntil, approved,
+//          generated, getAddress(), signTypedData(...), toViemAccount(), markApproved({validUntil, agentName}),
+//          forget(), pending } | null (only when create:false and no key)
+//   The key lives in the Butler's vault; the signer exports AGENT_KEY_STORE = "vault".
 //   signTypedData accepts (domain, types, value) AND ({ domain, types, primaryType, message }).
 //   Owner waits throw PendingOwnerAction { kind, key, route, approvalId, resumable }.
 //
 // Pure helpers (arg parsing, guards, error mapping, agent approval maths) are
 // exported so the unit tests can exercise them without any network.
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, dirname } from "node:path";
@@ -65,12 +67,12 @@ export const DEV_MAX_NOTIONAL = 10;
 export const AGENT_EXPIRY_WARN_DAYS = 14;
 /** Agent approvals with less than this left must be rotated (mustRotate). */
 export const AGENT_ROTATE_DAYS = 7;
-/** Label the signer stores this skill's agent key under (venue_credentials.venue_id). */
+/** Vault label of this skill's agent key: the item is named outcome.<wallet>. */
 export const AGENT_KEY_LABEL = "outcome";
 /** Hyperliquid agent name used in production. Re-approving the same name replaces the old agent. */
 export const PROD_AGENT_NAME = "Butler";
 /** Dev default, so local tests never replace the production "Butler" agent. */
-export const DEV_AGENT_NAME_DEFAULT = "bevo-dev";
+export const DEV_AGENT_NAME_DEFAULT = "bevo";
 /** Account abstraction modes where spot and perps are one balance. */
 export const UNIFIED_MODES = new Set(["unifiedAccount", "portfolioMargin"]);
 
@@ -138,7 +140,7 @@ export function toJson(obj) {
  * Map an owner wait (PendingOwnerAction) to an envelope.
  *  - resumable (main-wallet signature): ok, status pending_owner_signature, with a
  *    `--resume <key>` command when the script persisted its pending state.
- *  - not resumable (agent-key authorization; the server refuses approvals > 90 s):
+ *  - not resumable (a wallet signature asked inside a script that has no --resume):
  *    status authorization_timeout. Nothing was executed; re-running files a new card.
  */
 export function pendingEnvelope(err, resumeCommand = null) {
@@ -177,14 +179,29 @@ export function pendingOwnerAction(fields = {}) {
 
 const OWNER_DECLINED_CODES = new Set(["APPROVAL_REJECTED", "APPROVAL_EXPIRED", "OWNER_DECLINED"]);
 
+const SIGNER_CODE_ALIASES = {
+  VAULT_CONFLICT: "AGENT_SETUP_IN_PROGRESS",
+  ACCOUNTS_REQUIRED: "SIGNER_OUTDATED",
+};
+
+const SIGNER_CODE_HINTS = {
+  VAULT_PENDING:
+    "No trading key is available here yet (the vault has not been restored). Run setup_agent.mjs: it makes a fresh key with one wallet signature.",
+  VAULT_UNAVAILABLE: "The Butler's vault could not be reached. Retry once in a minute, then tell the owner.",
+  VAULT_FULL: "The Butler's vault is full. Tell the owner; nothing was stored.",
+  AGENT_SETUP_IN_PROGRESS: "Another run is setting up the trading key. Run status.mjs in a minute.",
+  SIGNER_OUTDATED: "The container must be redeployed onto the current image.",
+};
+
 /** "approval_rejected" / "signerSealed" / "KEY-REUSED" -> APPROVAL_REJECTED / SIGNER_SEALED / KEY_REUSED. */
 export function normalizeCode(code) {
-  return String(code)
+  const normalized = String(code)
     .trim()
     .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
     .replace(/[^A-Za-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "")
     .toUpperCase();
+  return SIGNER_CODE_ALIASES[normalized] ?? normalized;
 }
 
 /** Turn any thrown value into an envelope. Unknown errors never leak a stack. */
@@ -210,7 +227,7 @@ export function envelopeFromError(err) {
         data: { signerCode: code },
       });
     }
-    return errorEnvelope(code, String(err.message ?? code).slice(0, 500), { hint: err.hint ?? null });
+    return errorEnvelope(code, String(err.message ?? code).slice(0, 500), { hint: err.hint ?? SIGNER_CODE_HINTS[code] ?? null });
   }
   return errorEnvelope("UNEXPECTED", String(err?.message ?? err).slice(0, 500), {
     hint: "Unexpected failure. Re-run status.mjs before retrying anything that moves money.",
@@ -442,6 +459,41 @@ export async function assertKeyFresh(signerMod, key, { route = "execute", resume
   });
 }
 
+export function orderCloid(script, key, leg = null) {
+  const parts = ["prediction-market", script, key];
+  if (leg !== null && leg !== undefined) parts.push(String(leg));
+  return `0x${createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 32)}`;
+}
+
+const LIVE_ORDER_STATUSES = new Set(["open", "triggered"]);
+
+export function isLiveOrderStatus(status) {
+  return LIVE_ORDER_STATUSES.has(status);
+}
+
+export async function venueOrderStatus(user, oid, info = hlInfo) {
+  const res = await info({ type: "orderStatus", user, oid });
+  if (!res || res.status !== "order") return null;
+  return String(res.order?.status ?? "unknown");
+}
+
+export function cloidReused(cloid, venueStatus) {
+  return new SkillError("KEY_REUSED", `This --idempotency-key already placed an order on Hyperliquid (${venueStatus}); nothing new was sent.`, {
+    hint: "Run account.mjs to see that order or its fill. Use a NEW key only for a new order your owner asked for.",
+    data: { venueStatus, cloid },
+  });
+}
+
+export async function assertCloidFresh(user, cloid, info = hlInfo) {
+  const venueStatus = await venueOrderStatus(user, cloid, info);
+  if (venueStatus) throw cloidReused(cloid, venueStatus);
+}
+
+export function isDuplicateCloidError(text) {
+  const s = String(text ?? "");
+  return /cloid/i.test(s) && /duplicate|already|exist|reuse|used/i.test(s);
+}
+
 export function assertDevCap(notional, isDev, what) {
   if (isDev && notional > DEV_MAX_NOTIONAL) {
     throw new SkillError(
@@ -590,9 +642,17 @@ export async function agentHealth(mainAddr, agentAddr) {
 export function requireValidAgent(health) {
   if (health.valid) return health;
   throw new SkillError("AGENT_INVALID", `The trading key cannot be used: ${health.reason}`, {
-    hint: "Run setup_agent.mjs --rotate, then retry this command once.",
+    hint: "Run setup_agent.mjs (one card), then retry this command once.",
     status: "needs_agent",
     data: { agentAddress: health.address ?? null },
+  });
+}
+
+export function labelAgents(agents, { ourName = null, storedAddress = null, keyKnown = false } = {}, now = Date.now()) {
+  return (agents ?? []).map((a) => {
+    const approval = agentApproval(agents, a.address, now);
+    const ours = ourName !== null && approval.name === ourName;
+    return { ...approval, ours, placeholder: ours && keyKnown && !storedAddress };
   });
 }
 
@@ -610,7 +670,7 @@ const ERROR_TABLE = [
     re: /does not exist/i,
     code: "AGENT_INVALID",
     message: "The trading key (Hyperliquid agent) is no longer approved for this wallet.",
-    hint: "Run setup_agent.mjs --rotate, then retry this command once. Never re-approve the old key.",
+    hint: "Run setup_agent.mjs (it makes a fresh key), then retry this command once. Never re-approve the old key.",
   },
   {
     re: /Must deposit before performing actions/i,
@@ -712,7 +772,20 @@ export async function loadSigner() {
       hint: "The container must be redeployed onto the current image.",
     });
   }
+  if (mod.AGENT_KEY_STORE !== "vault") {
+    throw new SkillError("SIGNER_OUTDATED", "BEVO_SIGNER is an older signer that does not keep the trading key in the vault.", {
+      hint: "The container must be redeployed onto the current image.",
+    });
+  }
   return mod;
+}
+
+let accountsModule;
+
+/** viem/accounts, loaded once; the signer has no dependencies and takes it as the `accounts` option. */
+export async function viemAccounts() {
+  accountsModule ??= await import("viem/accounts");
+  return accountsModule;
 }
 
 /**
@@ -794,13 +867,17 @@ export function nktkasMainWallet(signer, trap) {
  * Agent-key signed move of USDC between the account's own perps ("") and spot
  * ("spot") with agentSendAsset; the destination is always the same main wallet.
  */
-export async function moveUsdcInAccount({ agent, trap, main, sourceDex, destinationDex, amount, errorData = null }) {
+export async function agentExchange(agent, trap) {
   const { ExchangeClient, HttpTransport } = await import("@nktkas/hyperliquid");
-  const exchange = new ExchangeClient({
+  return new ExchangeClient({
     transport: new HttpTransport({ isTestnet: false }),
     wallet: nktkasAgentWallet(agent, trap),
     signatureChainId: HL_SIGNATURE_CHAIN_ID,
   });
+}
+
+export async function moveUsdcInAccount({ agent, trap, main, sourceDex, destinationDex, amount, errorData = null }) {
+  const exchange = await agentExchange(agent, trap);
   try {
     await exchange.agentSendAsset({
       destination: main,
@@ -816,6 +893,63 @@ export async function moveUsdcInAccount({ agent, trap, main, sourceDex, destinat
     throw err;
   }
   trap.check(agent);
+}
+
+const HL_TIF = { GTC: "Gtc", ALO: "Alo", FAK: "Ioc" };
+
+export function outcomeOrderWire({ assetId, side, price, size, tif = "GTC", cloid }) {
+  const hlTif = HL_TIF[tif];
+  if (!hlTif) throw badArgs("--tif must be GTC, ALO or FAK");
+  return { a: assetId, b: side === "buy", p: String(price), s: String(size), r: false, t: { limit: { tif: hlTif } }, c: cloid };
+}
+
+export function orderStatusResult(status) {
+  if (status?.filled) return { orderId: String(status.filled.oid), orderStatus: "filled", filledShares: status.filled.totalSz ?? null };
+  if (status?.resting) return { orderId: String(status.resting.oid), orderStatus: "resting", filledShares: null };
+  return { orderId: null, orderStatus: typeof status === "string" ? status : "unknown", filledShares: null };
+}
+
+export function orderSubmitFailure(err, cloid, data = null) {
+  const text = String(err?.message ?? err ?? "");
+  if (isDuplicateCloidError(text)) return cloidReused(cloid, "duplicate_cloid");
+  if (err?.name === "ApiRequestError") return exchangeSkillError(text, data);
+  if (err?.name === "ValidationError") {
+    return new SkillError("ORDER_INVALID", `The SDK refused the order before sending it: ${text.slice(0, 300)}`, { data });
+  }
+  return new SkillError("ORDER_UNKNOWN", `The order result is unknown: ${text.slice(0, 300) || "no response"}.`, {
+    hint: "Run account.mjs for the order or a fill. Re-running with the SAME --idempotency-key is safe: it never places a second order.",
+    data: { ...(data ?? {}), cloid },
+  });
+}
+
+export async function placeOutcomeOrder({ agent, trap, main, wire, errorData = null, info = hlInfo }) {
+  await assertCloidFresh(main, wire.c, info);
+  const exchange = await agentExchange(agent, trap);
+  let res;
+  try {
+    res = await exchange.order({ orders: [wire], grouping: "na" });
+  } catch (err) {
+    trap.check(agent);
+    throw orderSubmitFailure(err, wire.c, errorData);
+  }
+  trap.check(agent);
+  return { ...orderStatusResult(res?.response?.data?.statuses?.[0]), cloid: wire.c };
+}
+
+const ALREADY_DONE_CANCEL_RE = /already cancel+ed|never placed|or filled/i;
+
+export function classifyCancelStatuses(targets, statuses) {
+  const results = targets.map((o, i) => {
+    const ok = statuses?.[i] === "success";
+    const error = ok ? null : statuses?.[i]?.error ?? "no status returned";
+    return { orderId: String(o.oid), marketId: o.marketId, coin: o.coin, ok, alreadyDone: !ok && ALREADY_DONE_CANCEL_RE.test(error), error };
+  });
+  return {
+    results,
+    cancelled: results.filter((r) => r.ok),
+    alreadyDone: results.filter((r) => r.alreadyDone),
+    failed: results.filter((r) => !r.ok && !r.alreadyDone),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -862,6 +996,175 @@ export function rethrowWithResume(err, key) {
   }
   throw err;
 }
+
+// ---------------------------------------------------------------------------
+// Trading key lifecycle (the key itself lives in the Butler's vault)
+// ---------------------------------------------------------------------------
+
+const CONFIRM_WAIT_CAP_MS = 30_000;
+const SETUP_SCRIPT = "setup_agent";
+
+/** Poll extraAgents(main) until `accept(agents)` returns something truthy; null on timeout. */
+export async function pollExtraAgents(main, accept, capMs = CONFIRM_WAIT_CAP_MS) {
+  const deadline = Date.now() + stepBudgetMs(capMs);
+  do {
+    let agents = null;
+    try {
+      agents = await fetchExtraAgents(main);
+    } catch {
+      agents = null;
+    }
+    const hit = agents === null ? null : accept(agents);
+    if (hit) return hit;
+    if (Date.now() + 2_000 >= deadline) break;
+    await sleep(2_000);
+  } while (Date.now() < deadline);
+  return null;
+}
+
+/** Approval record once Hyperliquid lists the agent address as approved, else null. */
+export function waitUntilListed(main, agentAddress, capMs = CONFIRM_WAIT_CAP_MS) {
+  return pollExtraAgents(main, (agents) => {
+    const st = agentApproval(agents, agentAddress);
+    return st.approved ? st : null;
+  }, capMs);
+}
+
+/** `{ gone: true }` once Hyperliquid no longer lists the agent address, else null. */
+export function waitUntilGone(main, agentAddress, capMs = CONFIRM_WAIT_CAP_MS) {
+  return pollExtraAgents(main, (agents) => (agentApproval(agents, agentAddress).present ? null : { gone: true }), capMs);
+}
+
+/** Best-effort: record Hyperliquid's approval facts on the stored key when they differ. */
+export async function recordApproval(agent, health) {
+  if (!agent || !health?.valid) return;
+  const validUntil = health.validUntilIso ?? null;
+  if (agent.approvedAt && agent.validUntil === validUntil) return;
+  try {
+    await agent.markApproved({ validUntil, agentName: health.name ?? undefined });
+  } catch {
+    return;
+  }
+}
+
+/**
+ * Make a fresh trading key and approve it with one wallet-level ApproveAgent signature.
+ * The key is saved in the vault BEFORE any approval is asked. With `rec` (a --resume of
+ * setup_agent) the stored key is read only and must be the one the record names.
+ */
+export async function bootstrapAgent({ signerMod, signer, signByDutyWallet, key = null, rec = null }) {
+  const main = signer.address;
+  const agentName = rec?.agentName ?? agentNameFor(signerMod);
+  const agent = await signerMod.agentKey({
+    label: AGENT_KEY_LABEL,
+    accounts: await viemAccounts(),
+    signByDutyWallet,
+    rotate: !rec,
+    create: !rec,
+    agentName,
+    deadline: scriptDeadline(),
+  });
+  if (rec && (!agent || agent.address.toLowerCase() !== String(rec.agentAddress).toLowerCase())) {
+    if (key) clearPending(key);
+    throw new SkillError("RESUME_MISMATCH", "The trading key changed since this approval was requested.", {
+      hint: "Run status.mjs, then setup_agent.mjs if a key is still needed.",
+      status: "needs_agent",
+    });
+  }
+
+  if (!rec && agent.generated === false) {
+    const listed = await waitUntilListed(main, agent.address);
+    if (!listed) {
+      throw new SkillError("AGENT_SETUP_IN_PROGRESS", "Another run is setting up the trading key and Hyperliquid does not list it yet.", {
+        hint: "Run status.mjs in a minute.",
+        data: { agentAddress: agent.address },
+      });
+    }
+    await recordApproval(agent, { ...listed, valid: true, name: listed.name ?? agentName });
+    return { agent, approval: listed, resumed: false, adopted: true };
+  }
+
+  const { getAgentApprovalTypedData, submitAgentApproval, nextNonce } = await import("@outcome.xyz/hip4");
+  const record = rec ?? { script: SETUP_SCRIPT, mainWallet: main, nonce: nextNonce(), agentAddress: agent.address, agentName };
+  if (!rec && key) savePending(key, record);
+
+  const typedData = getAgentApprovalTypedData(record.agentAddress, record.agentName, record.nonce, true);
+  let signature;
+  try {
+    signature = await signer.signTypedData(typedData);
+  } catch (err) {
+    if (key) rethrowWithResume(err, key);
+    throw err;
+  }
+
+  const res = await submitAgentApproval(signature, record.agentAddress, record.agentName, record.nonce, true);
+  if (key) clearPending(key);
+  if (!res.success) {
+    throw new SkillError("APPROVE_FAILED", `Hyperliquid refused the approval: ${res.error ?? "unknown error"}`, {
+      hint: /deposit/i.test(res.error ?? "")
+        ? "Run deposit.mjs --amount 5 (or more) first."
+        : "Run status.mjs first. If all named agent slots are used, approving an existing name replaces it (locally: DEV_AGENT_NAME).",
+      data: { agentAddress: record.agentAddress, agentName: record.agentName, raw: res.error ?? null },
+    });
+  }
+
+  const approval = await waitUntilListed(main, record.agentAddress);
+  if (!approval) {
+    throw new SkillError("AGENT_APPROVAL_UNCONFIRMED", "Hyperliquid accepted the approval but does not list the key yet.", {
+      hint: "Run status.mjs in a minute; if the key is listed, run setup_agent.mjs again (it will just confirm).",
+      data: { agentAddress: record.agentAddress, agentName: record.agentName },
+    });
+  }
+  await agent.markApproved({ validUntil: approval.validUntilIso ?? null, agentName: approval.name ?? record.agentName });
+  return { agent, approval, resumed: Boolean(rec), adopted: false };
+}
+
+/**
+ * The trading key every agent-signed script uses: read from the vault, checked against
+ * Hyperliquid before use. A key the venue no longer approves is replaced when the signer
+ * says this run signs hands-free (`approval: "auto"`), else the owner is told to run setup.
+ */
+export function isVaultPending(err) {
+  return typeof err?.code === "string" && normalizeCode(err.code) === "VAULT_PENDING";
+}
+
+export async function readStoredAgent(signerMod, { signByDutyWallet } = {}) {
+  try {
+    const agent = await signerMod.agentKey({
+      label: AGENT_KEY_LABEL,
+      accounts: await viemAccounts(),
+      signByDutyWallet,
+      create: false,
+      deadline: scriptDeadline(),
+    });
+    return { agent: agent ?? null, vaultState: null };
+  } catch (err) {
+    if (isVaultPending(err)) return { agent: null, vaultState: "pending" };
+    throw err;
+  }
+}
+
+export async function ensureAgent({ signerMod, signer, signByDutyWallet }) {
+  const { agent, vaultState } = await readStoredAgent(signerMod, { signByDutyWallet });
+  const health = await agentHealth(signer.address, agent?.address ?? null);
+  if (vaultState) health.reason = PENDING_VAULT_REASON;
+  if (health.valid) {
+    await recordApproval(agent, health);
+    return { agent, health };
+  }
+  if (signer.approval === "auto") {
+    const done = await bootstrapAgent({ signerMod, signer, signByDutyWallet });
+    const code = done.approval.expiringSoon ? "AGENT_EXPIRING" : "AGENT_OK";
+    return { agent: done.agent, health: { ...done.approval, valid: true, code, reason: "Approved." } };
+  }
+  throw new SkillError("AGENT_INVALID", `The trading key cannot be used: ${health.reason}`, {
+    hint: "Run setup_agent.mjs (one card), then retry once.",
+    status: "needs_agent",
+    data: { agentAddress: health.address ?? null, vaultState },
+  });
+}
+
+const PENDING_VAULT_REASON = "No trading key is available here yet (the vault has not been restored).";
 
 // ---------------------------------------------------------------------------
 // Hyperliquid info + Arbitrum reads
@@ -959,6 +1262,23 @@ export async function createHip4() {
   return hip4;
 }
 
+/** Coin lookups over fetchMarkets() output: names per outcome coin, outcome-coin test, describe(coin). */
+export function outcomeCatalog(markets, parseSideCoin) {
+  const byCoin = new Map();
+  for (const m of Array.isArray(markets) ? markets : []) {
+    m.sides.forEach((s, i) =>
+      byCoin.set(s.coin, { marketId: String(m.outcomeId), market: m.parsedName ?? m.name, question: m.parsedQuestionName ?? null, outcome: i === 0 ? "YES" : "NO", side: s.parsedName ?? s.name }),
+    );
+  }
+  const isOutcomeCoin = (coin) => /^[#+]\d+$/.test(coin ?? "") && parseSideCoin(coin) !== null;
+  const describe = (coin) => {
+    const p = parseSideCoin(coin);
+    const hash = `#${coin.slice(1)}`;
+    return byCoin.get(hash) ?? { marketId: p ? String(p.outcomeId) : null, market: null, outcome: p?.sideIndex === 0 ? "YES" : "NO", side: null };
+  };
+  return { byCoin, isOutcomeCoin, describe };
+}
+
 /** Resolve --outcome (YES/NO, 0/1, or a side name) to a side index. */
 export function resolveSideIndex(outcome, sides) {
   const o = String(outcome ?? "").trim();
@@ -978,11 +1298,36 @@ export function resolveSideIndex(outcome, sides) {
 // status.mjs decision (pure)
 // ---------------------------------------------------------------------------
 
+export const HL_ACP_CHAIN_ID = 1337;
+export const MIN_ACP_DEPOSIT_USDC = 5.5;
+export const ACP_BRIDGE_MARGIN_USDC = 0.3;
+export const ACP_FIRST_DEPOSIT_MARGIN_USDC = 1.5;
+
+export function acpDepositAmount(gap, { firstDeposit = false } = {}) {
+  const margin = firstDeposit ? ACP_FIRST_DEPOSIT_MARGIN_USDC : ACP_BRIDGE_MARGIN_USDC;
+  return Math.max(MIN_ACP_DEPOSIT_USDC, ceilCents(Math.max(0, gap) + margin));
+}
+
+export function acpDepositCommand(amount) {
+  const usd = decimalString(Math.max(MIN_ACP_DEPOSIT_USDC, ceilCents(amount)), 2);
+  return `acp trade --token-in usdc --amount-in ${usd} --token-out usdc --chain-out ${HL_ACP_CHAIN_ID} --idempotency-key <new key> --json`;
+}
+
+export function depositShortfallHint(amount) {
+  return (
+    `Deposit with acp instead: \`${acpDepositCommand(amount)}\` pulls USDC from any of this wallet's chains ` +
+    "(never add --recipient); if this wallet never held funds on Hyperliquid, add 1.5 for the first-deposit loss. " +
+    "Only without acp: the owner adds native USDC (not USDC.e) on Arbitrum."
+  );
+}
+
 /** Decide the next step from the readings. */
 export function computeNext({ hl, arb, agent, need = MIN_ORDER_NOTIONAL }) {
   const hlTotal = hl.unified ? hl.spotUsdcFree : round6(hl.spotUsdcFree + hl.perpsWithdrawable);
   if (hl.role === "missing" || hlTotal < need) {
     const shortfall = Math.max(MIN_DEPOSIT_USDC, ceilCents(need - hlTotal));
+    const firstDeposit = hl.role === "missing";
+    const acpSendUsdc = acpDepositAmount(ceilCents(need - hlTotal), { firstDeposit });
     return {
       status: "needs_deposit",
       reason:
@@ -990,17 +1335,27 @@ export function computeNext({ hl, arb, agent, need = MIN_ORDER_NOTIONAL }) {
           ? "This wallet has never deposited to Hyperliquid."
           : `Hyperliquid holds $${hlTotal} USDC; $${need} is needed.`,
       suggestedDepositUsdc: shortfall,
+      depositCommand: acpDepositCommand(acpSendUsdc),
+      acpSendUsdc,
+      firstDeposit,
+      creditNote: `acp credits about the amount minus ~0.2 USDC${firstDeposit ? ", and this first deposit into a wallet new to Hyperliquid likely loses ~1 USDC more" : ""}. Continue once status shows $${need} on Hyperliquid; never wait for the full amount sent.`,
+      fallback: `No acp: deposit.mjs --amount ${decimalString(shortfall, 2)} (Arbitrum USDC only).`,
       arbitrumUsdcEnough: arb ? arb.usdc >= shortfall : null,
     };
   }
   if (agent && !agent.valid) {
     return {
       status: "needs_agent",
-      code: "AGENT_INVALID",
-      reason: agent.everCreated
-        ? "The stored trading key is not approved on Hyperliquid (replaced, pruned or never completed)."
-        : "No trading key yet.",
-      rotate: Boolean(agent.everCreated),
+      code: agent.vaultCode ?? "AGENT_INVALID",
+      reason: agent.vaultCode
+        ? agent.reason
+        : agent.vaultState === "pending"
+          ? `${PENDING_VAULT_REASON} Run setup_agent.mjs to make a fresh one.`
+          : agent.everCreated
+          ? "The stored trading key is not approved on Hyperliquid (replaced, pruned or never completed)."
+          : "No trading key yet.",
+      rotate: false,
+      ...(agent.vaultState ? { vaultState: agent.vaultState } : {}),
     };
   }
   if (!hl.unified && hl.spotUsdcFree < need) {

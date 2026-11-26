@@ -14,12 +14,13 @@ import {
   readHlBalances,
   readArbitrumBalances,
   fetchExtraAgents,
-  agentApproval,
+  labelAgents,
   agentHealth,
   agentNameFor,
   parseUsdAmount,
+  normalizeCode,
+  readStoredAgent,
   SkillError,
-  AGENT_KEY_LABEL,
   MIN_ORDER_NOTIONAL,
   computeNext,
 } from "./lib/common.mjs";
@@ -33,6 +34,8 @@ runScript(async () => {
 
   let main;
   let agentKeyObj = null;
+  let vaultProblem = null;
+  let vaultState = null;
   let signerMod = null;
   let signerScope = null;
   if (args.address) {
@@ -43,11 +46,13 @@ runScript(async () => {
     const signer = await signerMod.mainSigner({});
     main = signer.address;
     signerScope = signer.walletScope ?? null;
-    agentKeyObj = await signerMod.agentKey({
-      label: AGENT_KEY_LABEL,
-      rotate: false,
-      create: false,
-    });
+    try {
+      ({ agent: agentKeyObj, vaultState } = await readStoredAgent(signerMod));
+    } catch (err) {
+      const code = typeof err?.code === "string" ? normalizeCode(err.code) : null;
+      if (code !== "VAULT_UNAVAILABLE") throw err;
+      vaultProblem = { code, message: String(err.message ?? code).slice(0, 200) };
+    }
   }
 
   const [hl, arb, agents] = await Promise.all([
@@ -59,7 +64,9 @@ runScript(async () => {
   let agent = null;
   if (signerMod) {
     // Validity comes only from agentHealth (extraAgents + userRole), never from the signer's flag.
-    const health = await agentHealth(main, agentKeyObj?.address ?? null);
+    const health = vaultProblem
+      ? { valid: false, code: vaultProblem.code, vaultCode: vaultProblem.code, reason: vaultProblem.message }
+      : await agentHealth(main, agentKeyObj?.address ?? null);
     agent = {
       ...health,
       address: agentKeyObj?.address ?? null,
@@ -67,6 +74,7 @@ runScript(async () => {
       everCreated: Boolean(agentKeyObj),
       storedApproved: Boolean(agentKeyObj?.approved),
       expectedName: agentNameFor(signerMod),
+      vaultState,
     };
   }
 
@@ -77,7 +85,11 @@ runScript(async () => {
     mainWallet: main,
     walletScope: signerScope,
     agent,
-    allAgents: agents.map((a) => agentApproval(agents, a.address)),
+    allAgents: labelAgents(agents, {
+      ourName: signerMod ? agentNameFor(signerMod) : null,
+      storedAddress: agentKeyObj?.address ?? null,
+      keyKnown: Boolean(signerMod) && !vaultState && !vaultProblem,
+    }),
     hyperliquid: {
       role: hl.role,
       abstraction: hl.abstraction,

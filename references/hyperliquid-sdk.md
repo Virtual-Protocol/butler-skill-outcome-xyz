@@ -30,6 +30,9 @@ Background for answering your owner's questions. The scripts hold every constant
 
 ## Deposit (Arbitrum → Hyperliquid), `deposit.mjs`
 
+The preferred deposit is acp's aggregated move (`--chain-out 1337`, see `deposit.md`), which
+takes USDC from any chain. `deposit.mjs` is the fallback when `acp` is not installed:
+
 | Fact | Value |
 | --- | --- |
 | How | One plain ERC-20 transfer of **native USDC on Arbitrum One** from the main wallet to Hyperliquid's Bridge2 contract (0x2df1…3df7). Hyperliquid credits the **sending** address. |
@@ -41,9 +44,10 @@ Background for answering your owner's questions. The scripts hold every constant
 | Not credited yet | `deposit_pending` with a resume command: run that later. It re-checks under the same key and never sends again. |
 | Bridge status | Hyperliquid marks Bridge2 "legacy" in favour of CCTP, but it still credits deposits. |
 
-If the main wallet has too little USDC on Arbitrum (`INSUFFICIENT_USDC`, or status says
-`arbitrumUsdcEnough: false`), your owner must send native USDC on Arbitrum to `mainWallet`
-first.
+If the wallet has too little USDC on Arbitrum for this fallback (`INSUFFICIENT_USDC`, or
+status says `arbitrumUsdcEnough: false`), deposit with acp's move instead (`deposit.md`): it
+takes USDC from any chain. Only without acp must your owner send native USDC on Arbitrum to
+`mainWallet` first.
 
 ## Withdraw (Hyperliquid → Arbitrum), `withdraw.mjs`
 
@@ -69,12 +73,13 @@ a withdrawal and nothing on a unified account.
   the same account, so the key cannot send money anywhere else.
 - Moves only the gap: `ceil-to-cents(amount − spotUsdcFree)`. Needs that much in
   `perpsWithdrawable`, else `NEEDS_DEPOSIT`.
-- Main Chat: one authorization card. A live duty: automatic.
+- Signed by the trading key: no card.
 
 ## The trading key (Hyperliquid "agent" / API wallet)
 
-- **What it is**: a separate key, held by Butler's server (never shown to you), that the
-  main wallet approves once by signing Hyperliquid's `ApproveAgent` message. After that
+- **What it is**: a separate key, kept in Butler's private vault (never shown to you; see
+  `credentials.md`), that the wallet approves once by signing Hyperliquid's `ApproveAgent`
+  message. After that
   it signs orders, cancels and same-account perps→spot moves.
 - **What it can never do**: withdraw, send USDC or tokens to another address, approve
   another key, or change the account mode. Those need the main wallet. Note: a key can
@@ -87,7 +92,7 @@ a withdrawal and nothing on a unified account.
 - **It also stops working when**: another key is approved under the same name, or the
   account is emptied (Hyperliquid prunes agents of an account with no funds).
 - **Never re-approve an old key address.** After pruning, its nonce history may be gone and
-  old signatures could be replayed. `setup_agent.mjs --rotate` always makes a fresh key.
+  old signatures could be replayed. A replacement is always a fresh key.
 - **How validity is decided** (only by the scripts, never by guessing):
 
 | Signal | Result |
@@ -100,10 +105,13 @@ a withdrawal and nothing on a unified account.
 | an order or cancel answered "User or API Wallet ... does not exist" | `AGENT_INVALID` |
 | any other exchange error | `EXCHANGE_ERROR`: not a key problem until `status.mjs` says so |
 
-- **Rotation** (`setup_agent.mjs --rotate`): the server creates a fresh key and replaces the
-  stored one at once, the main wallet signs ApproveAgent (signature card in Main Chat), the
-  script submits it and waits until Hyperliquid lists the new key. Because the old key is
-  gone the moment rotation starts, renewing a still-valid key needs your owner's yes first.
+- **Rotation** (`setup_agent.mjs --rotate`): a fresh key replaces the stored one in the vault
+  at once, the wallet signs ApproveAgent (a card on the main wallet), the script submits it
+  and waits until Hyperliquid lists the new key. Because the old key is gone the moment
+  rotation starts, renewing a still-valid key needs your owner's yes first. A missing or
+  invalid key is replaced the same way without `--rotate`.
+- **Revoke** (`revoke_agent.mjs`): Hyperliquid has no agent delete, so the stored key is
+  deleted and a throwaway address is approved under the same name, which replaces the old one.
 
 ## Nonces (why some steps cannot be resumed)
 
@@ -113,14 +121,17 @@ a withdrawal and nothing on a unified account.
 - ApproveAgent's nonce is fixed when the card is filed and saved with the pending step, so
   `setup_agent.mjs --resume` can submit the owner's signature later (it stays valid for
   about 2 days). A withdrawal works the same way: its `time` is the nonce.
-- Orders, cancels and perps→spot moves get their nonce inside the SDK at signing time, so a
-  timed-out authorization cannot be resumed: it must be asked again (a new card, new key).
+- Orders, cancels and perps→spot moves get their nonce inside the SDK at signing time, so
+  they are never resumed. They are safe to re-run with the same key instead: an order
+  carries a client order id (`cloid`, 16 bytes from sha256 of
+  `prediction-market|<script>|<key>`) that `orderStatus` looks up before sending; a cancel of
+  an order already gone is `alreadyDone`; a perps↔spot move only tops up the gap.
 
 ## Reads the scripts use (Hyperliquid info API)
 
 `spotClearinghouseState` (spot balances, outcome shares as `+…` rows), `clearinghouseState`
 (perps `withdrawable`), `userAbstraction` (mode), `userRole` (`missing`, `user`, `agent`),
 `extraAgents` (approved keys with `validUntil`), `userNonFundingLedgerUpdates` (deposits and
-withdrawals).
+withdrawals), `orderStatus` (by order id or cloid: `unknownOid`, or the order and its status).
 Hyperliquid answers errors in free text with HTTP 200; the scripts map the known ones to
 codes (see `commands.md`).

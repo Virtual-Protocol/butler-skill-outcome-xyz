@@ -1,5 +1,72 @@
 # Changelog
 
+## 2.1.0
+
+- New read-only `scripts/portfolio.mjs` and `scripts/lib/portfolio.mjs`: one wallet's Outcome
+  bets as `portfolio/v1` (`--wallet`), plus `positions`, `orders` and `balances` subcommands for
+  chat. Bets only: `availableUsd` and `orders` are null in the full portfolio. Declared as
+  `metadata.butler.portfolio`.
+- `account.mjs` shares the outcome coin lookup with it (`outcomeCatalog` in `lib/common.mjs`).
+
+## 2.0.0
+
+Breaking: the trading key now lives in the Butler's private vault (item `outcome.<wallet>`), not on
+bevo-server. The skill needs a container whose signer exports `AGENT_KEY_STORE = 'vault'`; an
+older container stops with `SIGNER_OUTDATED` and must be redeployed first.
+
+- The scripts check the stored key against Hyperliquid (`extraAgents`) before every use. A key the
+  venue no longer approves is replaced by a fresh one (never re-approved): `setup_agent.mjs` does
+  it with one wallet signature, and a trading script does it by itself when the signer says the
+  run signs hands-free (a duty's own live auto-execute wallet); otherwise it stops with
+  `AGENT_INVALID` and asks for `setup_agent.mjs`.
+- `setup_agent.mjs`: a stored, listed key is only confirmed (`alreadyApproved: true`, nothing
+  signed). A missing or invalid key is replaced without `--rotate`; `--rotate` still forces a new
+  key. The key is saved in the vault before any approval is asked. Two runs racing for the key
+  settle on the first one's key (`AGENT_SETUP_IN_PROGRESS` while it is not listed yet).
+- New `revoke_agent.mjs`: deletes the vault item, then approves a throwaway address under the same
+  agent name so Hyperliquid drops the old key (Hyperliquid has no agent delete). Resumable.
+- A vault not yet restored on this Butler (`pending`) means "no key here", never "wait":
+  `status.mjs` answers `needs_agent` (`AGENT_INVALID`, `vaultState: "pending"`), `setup_agent.mjs`
+  and `ensureAgent` treat it as a missing key and make a fresh one (a hands-free run does it by
+  itself; a card run points to `setup_agent.mjs`). A brand-new user's empty vault no longer
+  deadlocks. Needs the signer that saves while pending; a `vault_pending` throw on a read is
+  still taken as no key. `VAULT_UNAVAILABLE` is reported in `data.agent.code` and
+  `data.next.code`. Dev signer: `DEV_SIGNER_VAULT_STATE=pending` emulates it.
+- New codes `VAULT_PENDING`, `VAULT_UNAVAILABLE`, `VAULT_FULL`, `AGENT_SETUP_IN_PROGRESS`.
+- Trading-key steps no longer file an authorization card.
+- Order idempotency now comes from Hyperliquid: `place_bet.mjs` gives every order a client
+  order id (`cloid`) derived from the `--idempotency-key`, asks Hyperliquid's `orderStatus`
+  for it first and stops with `KEY_REUSED` (`data.venueStatus`, `data.cloid`) when the venue
+  already knows it; a duplicate cloid refused on submit is `KEY_REUSED` too. Re-running after
+  `ORDER_UNKNOWN` with the same key is safe. Orders are sent with `@nktkas/hyperliquid`
+  (hip4's `placeOrder` has no cloid). The bevo-server `agent_key` ledger check is gone from
+  `place_bet`, `cancel`, `ensure_spot` and `ensure_perps` (orders never pass through the
+  server); `deposit` and `withdraw` keep their server ledger check.
+- `status.mjs` marks each `allAgents` entry `ours` (this skill's agent name) and `placeholder`
+  (ours while no key is stored: the throwaway a revoke left until the next setup replaces it).
+  Duties report a `walletScope: "main"` run in their first note.
+- Deposits go through acp's aggregated move into Hyperliquid
+  (`acp trade --token-in usdc --amount-in <usd> --token-out usdc --chain-out 1337`), which takes
+  USDC from any of the wallet's chains into the signing wallet's own Hyperliquid account.
+  `deposit.mjs` (Arbitrum USDC → Bridge2) is the fallback when `acp` is not installed; its
+  shortfall hints and `status.mjs`'s `next.depositCommand` name the acp command first. acp credits
+  about the amount minus 0.2 USDC, as a Hyperliquid `send` (the Bridge2 5 USDC floor does not
+  apply); the first acp deposit into a wallet new to Hyperliquid likely loses ~1 USDC more, so
+  `next.depositCommand` sends the gap + 1.5 then (+ 0.3 later), never under 5.5. Continue once
+  status covers the next step's need, never wait for the full amount. `deposit.mjs` keeps ≥ 5. A duty's built-in funding card (USDC on Base) is enough. `acp` joins
+  `requires.bins`.
+- SKILL.md body cut to under 9,000 characters: the duty procedure, the failure table and the
+  per-script signing table moved to `references/duty.md`, `failures.md`, `actions.md`;
+  `references/deposit.md` is new.
+- `cancel.mjs` is idempotent: an order already cancelled or filled is `done` with
+  `alreadyDone: true` instead of `ORDER_NOT_FOUND`.
+- Dev signer: `DEV_AGENT_NAME` defaults to `bevo` everywhere (the scripts said `bevo-dev`
+  while seeding recorded `bevo`).
+- `SKILL.md` follows the hub's seven sections; credentials and recovery are in
+  `references/credentials.md`.
+- Dev signer: a 0600 file vault (`dev/.vault.json`) seeded once from `OUTCOME_AGENT_PRIVATE_KEY`
+  or the old `dev/.agent-key.json`.
+
 ## 1.0.1
 
 - Scripts never name a wallet: the server picks it from the session (a duty with its own

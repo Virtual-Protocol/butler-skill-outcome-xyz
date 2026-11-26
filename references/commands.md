@@ -24,7 +24,8 @@ Exactly one JSON object on stdout (diagnostics go to stderr, never a key):
 - Some failures carry a non-`error` status so you can route on it: `needs_agent`
   (`AGENT_INVALID`), `needs_deposit` (`NEEDS_DEPOSIT`), `needs_spot` (`NEEDS_SPOT`).
 - An owner wait is either `pending_owner_signature` (`ok: true`, resumable) or
-  `authorization_timeout` (`ok: false`, code `AUTHORIZATION_TIMEOUT`, not resumable).
+  `authorization_timeout` (`ok: false`, code `AUTHORIZATION_TIMEOUT`, not resumable: a wallet
+  signature asked inside a script that has no `--resume`).
   Both carry `data.kind`, `data.key`, `data.route`, `data.approvalId`.
 
 ## Flags shared by every signing script
@@ -32,7 +33,7 @@ Exactly one JSON object on stdout (diagnostics go to stderr, never a key):
 | Flag | Meaning |
 | --- | --- |
 | `--idempotency-key <key>` | Base key for this errand, `[A-Za-z0-9][A-Za-z0-9:_.-]{0,119}`. **Required** (`IDEMPOTENCY_KEY_REQUIRED` without it); only the local dev signer generates one. New key for every new ask. The signer derives one sub-key per signature (`<key>:1`, `<key>:2`). |
-| `--resume <key>` | deposit, setup_agent and withdraw only: finish a step that is waiting on a signature card (withdraw also after `WITHDRAW_UNKNOWN`). Cannot be combined with a different `--idempotency-key`, or with `--rotate`. |
+| `--resume <key>` | deposit, setup_agent, revoke_agent and withdraw only: finish a step that is waiting on a signature card (withdraw also after `WITHDRAW_UNKNOWN`). Cannot be combined with a different `--idempotency-key`, or with `--rotate`. |
 
 ## Read-only
 
@@ -49,17 +50,28 @@ any wallet with no signer and skips the trading-key check.
 - `mainWallet`: the account's address (the owner's Butler wallet or the duty's wallet).
 - `walletScope`: `duty` or `main`, which wallet the server picked (also on `account.mjs`).
 - `agent`: this skill's trading key: `address`, `code` (`AGENT_OK`, `AGENT_EXPIRING`,
-  `AGENT_INVALID`), `valid`, `reason`, `name`, `validUntilIso`, `daysLeft`,
+  `AGENT_INVALID`, or `VAULT_UNAVAILABLE` when the vault cannot be read), `valid`, `reason`, `name`, `validUntilIso`, `daysLeft`,
   `expiringSoon` (< 14 days), `mustRotate` (< 7 days), `everCreated` (a key was ever
-  stored), `roleSeen`/`roleUser` (Hyperliquid's view of the key). `null` with `--address`.
-- `allAgents`: every agent the wallet has approved on Hyperliquid (max 3 named).
+  stored), `roleSeen`/`roleUser` (Hyperliquid's view of the key), `vaultState` (`"pending"`
+  when the vault is not restored on this Butler yet: no key here, so `needs_agent` with
+  `AGENT_INVALID` and `next.vaultState`; run `setup_agent.mjs`, never wait). `null` with
+  `--address`.
+- `allAgents`: every agent the wallet has approved on Hyperliquid (max 3 named), each with
+  `ours` (listed under this skill's agent name) and `placeholder` (ours while no key is stored
+  here: the throwaway a revoke left, replaced by the next setup; false while the vault is
+  pending or unreadable).
 - `hyperliquid`: `role` (`missing` = never deposited), `abstraction`, `unified`,
   `spotUsdcFree`, `spotUsdcHold` (locked in open orders), `perpsWithdrawable`,
   `perpsAccountValue`.
 - `arbitrum`: `usdc`, `eth` of the wallet on Arbitrum, or `{error}`.
-- `next`: `{status, reason}` plus, per status: `suggestedDepositUsdc` and
-  `arbitrumUsdcEnough` (needs_deposit), `code` and `rotate` (needs_agent),
+- `next`: `{status, reason}` plus, per status: `suggestedDepositUsdc`, `depositCommand`
+  (acp's move into Hyperliquid, the preferred deposit), `acpSendUsdc` (what it sends: the
+  gap plus 0.3, or plus 1.5 for a `firstDeposit` into a wallet new to Hyperliquid, never under
+  5.5), `firstDeposit`, `creditNote` (continue once status covers `--need`, never wait for the
+  full amount), `fallback` (`deposit.mjs` without acp)
+  and `arbitrumUsdcEnough` (only matters for that fallback) (needs_deposit), `code` and `rotate` (needs_agent),
   `suggestedSpotAmount` (needs_spot), `code: "AGENT_EXPIRING"` (ready but renew soon).
+  `rotate` is true only for an expiring key (`needs_agent` with `AGENT_EXPIRING`).
 
 Order of checks: funds on Hyperliquid (`needs_deposit`), then key (`needs_agent`), then spot
 balance (`needs_spot`), then a key with < 7 days left (`needs_agent`, `AGENT_EXPIRING`).
@@ -99,7 +111,11 @@ size in shares). A market no longer live but settled returns
 
 ## Money-moving
 
-### deposit.mjs (main wallet, signature card in Main Chat)
+### deposit.mjs (wallet signature: card on the main wallet)
+
+Fallback only, when `command -v acp` is empty; the preferred deposit is acp's move
+(`deposit.md`). Its `INSUFFICIENT_USDC` / `NEEDS_HEADROOM` hints and `data.depositCommand`
+name that acp command first.
 
 `--amount <usdc> [--idempotency-key <key>]` or `--resume <key>`
 
@@ -118,25 +134,41 @@ call and never sends a second transfer.
 - Errors: `AMOUNT_BELOW_MINIMUM`, `INSUFFICIENT_USDC`, `NEEDS_HEADROOM`, `NEEDS_GAS` (dev), `DEPOSIT_TX_FAILED`,
   `RESUME_NOT_FOUND`, `RESUME_MISMATCH` (other wallet or amount), `DEV_CAP_EXCEEDED`.
 
-### setup_agent.mjs (main wallet, signature card in Main Chat)
+### setup_agent.mjs (wallet signature: card on the main wallet, none in a duty's own live wallet)
 
 `[--rotate] [--idempotency-key <key>]` or `--resume <key>`
 
 - Refuses a wallet that never deposited (`NEEDS_DEPOSIT`, status `needs_deposit`).
 - Without `--rotate`: a stored key that Hyperliquid lists as valid → `done` with
-  `alreadyApproved: true` (no card). No stored key → creates one and approves it. A stored
-  key Hyperliquid no longer lists → `AGENT_INVALID` (it is never re-approved).
-- `--rotate`: the server makes a fresh key and replaces the stored one immediately, then the
-  main wallet signs Hyperliquid's ApproveAgent for it. If the owner never signs, there is
-  no working key until they do.
+  `alreadyApproved: true` (nothing signed). No stored key, or one Hyperliquid no longer lists
+  → a fresh key is saved in the vault, then approved with one ApproveAgent signature.
+- `--rotate`: always a fresh key, replacing the stored one at once. If the owner never signs,
+  there is no working key until they do.
+- Two runs at once: the loser adopts the winner's key (`alreadyApproved: true`,
+  `generated: false`) once Hyperliquid lists it, else `AGENT_SETUP_IN_PROGRESS`.
 - After submitting, waits up to 30 s (less if the script budget is nearly used) for
   Hyperliquid to list the key; otherwise `AGENT_APPROVAL_UNCONFIRMED`.
 - `done`: `agentAddress`, `agentName`, `validUntilIso`, `daysLeft`, `generated` (this run made the key; false on `--resume`), `resumed`.
-- Errors: `NEEDS_DEPOSIT`, `AGENT_INVALID`, `APPROVE_FAILED` (`data.raw` is Hyperliquid's
-  text), `AGENT_APPROVAL_UNCONFIRMED`, `RESUME_NOT_FOUND`, `RESUME_MISMATCH` (the key was
-  rotated since; status `needs_agent`).
+- Errors: `NEEDS_DEPOSIT`, `APPROVE_FAILED` (`data.raw` is Hyperliquid's text),
+  `AGENT_APPROVAL_UNCONFIRMED`, `AGENT_SETUP_IN_PROGRESS`, `VAULT_UNAVAILABLE`,
+  `VAULT_FULL`, `RESUME_NOT_FOUND`, `RESUME_MISMATCH` (the key changed since; status `needs_agent`).
 
-### ensure_spot.mjs (trading key, authorization card in Main Chat)
+### revoke_agent.mjs (wallet signature, like setup_agent.mjs)
+
+`--idempotency-key <key>` or `--resume <key>`
+
+Deletes the stored key from the vault, then approves a throwaway address under the same agent
+name so Hyperliquid drops the old key, and waits until the old address is gone from
+`extraAgents`. No stored key → `done` with `revoked: false` (plus `vaultState: "pending"`
+when the vault is not restored here). The step is saved before signing
+(the key is already gone from the vault by then): `--resume <key>` finishes it.
+
+- `done`: `revoked`, `goneFromHyperliquid`, `oldAgentAddress`, `agentName`, `resumed`.
+- `pending_owner_signature`: the card is waiting; `data.resume` finishes it.
+- Errors: `APPROVE_FAILED` (the key is already gone from the vault; run status),
+  `VAULT_UNAVAILABLE`, `RESUME_NOT_FOUND`.
+
+### ensure_spot.mjs (trading key, no wallet signature)
 
 `--amount <usd> [--idempotency-key <key>]`
 
@@ -148,7 +180,7 @@ never moves more than the gap.
 - Errors: `NEEDS_DEPOSIT` (perps + spot < amount), `AGENT_INVALID`, mapped exchange codes,
   `authorization_timeout`.
 
-### ensure_perps.mjs (trading key, authorization card in Main Chat)
+### ensure_perps.mjs (trading key, no wallet signature)
 
 `--amount <usd> [--idempotency-key <key>]`
 
@@ -160,7 +192,7 @@ perps of the SAME account. On a unified account it moves nothing. Not resumable.
 - Errors: `INSUFFICIENT_HL_BALANCE` (spot + perps < amount), `AGENT_INVALID`, mapped
   exchange codes, `authorization_timeout`.
 
-### withdraw.mjs (main wallet, signature card in Main Chat)
+### withdraw.mjs (wallet signature: card on the main wallet)
 
 `--amount <usdc> | --all [--idempotency-key <key>]` or `--resume <key>`
 
@@ -190,7 +222,7 @@ Arbitrum in about 5 minutes. A live duty with its own wallet signs with no card.
   `WITHDRAW_UNKNOWN` (transport failure; may have gone through: `--resume`), `RESUME_NOT_FOUND`,
   `RESUME_MISMATCH`, `SIGN_TYPE_REFUSED` (signer refused the typed data), `DEV_CAP_EXCEEDED`.
 
-### place_bet.mjs (trading key, authorization card in Main Chat)
+### place_bet.mjs (trading key, no wallet signature)
 
 `--market <id> --outcome YES|NO|<side name> --side buy|sell --size <shares> --price <p>
 [--tif GTC|ALO|FAK] [--idempotency-key <key>]`
@@ -203,19 +235,31 @@ Arbitrum in about 5 minutes. A live duty with its own wallet signs with no card.
   enough free shares.
 - `done`: `market`, `outcome`, `sideName`, `side`, `size`, `price`, `notional`, `tif`,
   `orderId`, `orderStatus` (`filled` or `resting`), `filledShares` (when filled),
-  `agentHealth`.
+  `agentHealth`, `cloid`.
+- Idempotency: the order carries a Hyperliquid client order id (`cloid`) derived from the
+  `--idempotency-key`, so the same key always means the same order. Before anything else the
+  script asks Hyperliquid (`orderStatus`) for that cloid; if the venue knows it (open, filled,
+  cancelled or rejected) the script stops with `KEY_REUSED` (`data.venueStatus`, `data.cloid`)
+  and sends nothing. A submit that Hyperliquid refuses as a duplicate cloid is `KEY_REUSED`
+  too. So after `ORDER_UNKNOWN` or a run cut off with no JSON, re-running with the SAME key is
+  safe; a new key is a new order.
 - Errors: `BAD_ARGS`, `MARKET_ORDER_REFUSED`, `ORDER_BELOW_MINIMUM`, `MARKET_NOT_FOUND`,
   `MARKET_SETTLED`, `MARKET_NOT_TRADABLE`, `AGENT_INVALID`, `NEEDS_SPOT`,
-  `INSUFFICIENT_SHARES`, `ORDER_INVALID` (SDK refused, nothing sent), `ORDER_UNKNOWN`
-  (may have reached Hyperliquid), exchange codes below, `authorization_timeout`.
+  `INSUFFICIENT_SHARES`, `KEY_REUSED`, `ORDER_INVALID` (SDK refused, nothing sent),
+  `ORDER_UNKNOWN` (may have reached Hyperliquid; `data.cloid`), exchange codes below,
+  `authorization_timeout`.
 
-### cancel.mjs (trading key, authorization card in Main Chat)
+### cancel.mjs (trading key, no wallet signature)
 
 `--order-id <oid> | --all [--market <id>] [--idempotency-key <key>]`
 
 Cancels open outcome orders only (other Hyperliquid orders are never touched).
-`done`: `cancelled[]` and `failed[]` (`{orderId, error}`); `--all` with nothing open →
-`done` with `cancelled: []`. Errors: `ORDER_NOT_FOUND`, `AGENT_INVALID`, exchange codes.
+`done`: `cancelled[]`, `failed[]` (`{orderId, error}`) and `alreadyDone`; `--all` with
+nothing open → `done` with `cancelled: []`. Idempotent by nature: an `--order-id` that
+Hyperliquid reports as already cancelled or filled (`orderStatus`), or a cancel answered
+"already canceled, or filled", is `done` with `alreadyDone: true` (`venueStatus` or
+`alreadyDoneOrders[]`), never an error. Errors: `ORDER_NOT_FOUND` (unknown to Hyperliquid,
+or open in another market), `AGENT_INVALID`, exchange codes.
 
 ## Exchange codes (Hyperliquid's free-text answers, mapped)
 
@@ -236,5 +280,6 @@ Other codes: `HL_UNREACHABLE` / `HL_INFO_FAILED` (Hyperliquid info API down),
 `OWNER_DECLINED` (the signer reported `approval_rejected` / `approval_expired`: the owner
 declined or let the card expire; nothing ran), `UNEXPECTED` (unknown failure: read state
 before anything), and every other signer/server code passed through, normalised to
-UPPER_SNAKE (`key_reused` → `KEY_REUSED`: this idempotency key already ran).
+UPPER_SNAKE (`key_reused` → `KEY_REUSED`: this idempotency key already ran; for
+`place_bet` the venue already holds this key's order).
 `AUTHORIZATION_TIMEOUT` hint: re-place only if the owner still wants it, with a NEW key.

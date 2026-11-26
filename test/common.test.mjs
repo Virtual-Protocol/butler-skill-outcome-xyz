@@ -52,6 +52,19 @@ import {
   stepBudgetMs,
   SCRIPT_BUDGET_MS,
   BUDGET_MARGIN_MS,
+  ensureAgent,
+  bootstrapAgent,
+  readStoredAgent,
+  labelAgents,
+  acpDepositCommand,
+  depositShortfallHint,
+  orderCloid,
+  outcomeOrderWire,
+  placeOutcomeOrder,
+  assertCloidFresh,
+  orderSubmitFailure,
+  classifyCancelStatuses,
+  isDuplicateCloidError,
 } from "../scripts/lib/common.mjs";
 import { mkdtempSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -107,10 +120,14 @@ test("loadSigner: a signer without SESSION_WALLET_DEFAULT -> SIGNER_OUTDATED", a
     writeFileSync(old, "export async function mainSigner(){}\nexport async function agentKey(){}\n");
     process.env.BEVO_SIGNER = old;
     await assert.rejects(loadSigner(), (e) => e.code === "SIGNER_OUTDATED");
+    const noVault = join(dir, "no-vault.mjs");
+    writeFileSync(noVault, "export const SESSION_WALLET_DEFAULT = true;\nexport async function mainSigner(){}\nexport async function agentKey(){}\n");
+    process.env.BEVO_SIGNER = noVault;
+    await assert.rejects(loadSigner(), (e) => e.code === "SIGNER_OUTDATED" && /vault/.test(e.message));
     const ok = join(dir, "ok.mjs");
-    writeFileSync(ok, "export const SESSION_WALLET_DEFAULT = true;\nexport async function mainSigner(){}\nexport async function agentKey(){}\n");
+    writeFileSync(ok, "export const SESSION_WALLET_DEFAULT = true;\nexport const AGENT_KEY_STORE = 'vault';\nexport async function mainSigner(){}\nexport async function agentKey(){}\n");
     process.env.BEVO_SIGNER = ok;
-    assert.equal((await loadSigner()).SESSION_WALLET_DEFAULT, true);
+    assert.equal((await loadSigner()).AGENT_KEY_STORE, "vault");
   } finally {
     if (prev === undefined) delete process.env.BEVO_SIGNER;
     else process.env.BEVO_SIGNER = prev;
@@ -174,6 +191,11 @@ test("signer/server codes pass through normalised; never free-text mapped", () =
   assert.equal(normalizeCode("key_reused"), "KEY_REUSED");
   assert.equal(normalizeCode("signerSealed"), "SIGNER_SEALED");
   assert.equal(normalizeCode(" SIGN-TYPE refused "), "SIGN_TYPE_REFUSED");
+  assert.equal(normalizeCode("vault_pending"), "VAULT_PENDING");
+  assert.equal(normalizeCode("vault_unavailable"), "VAULT_UNAVAILABLE");
+  assert.equal(normalizeCode("vault_full"), "VAULT_FULL");
+  assert.equal(normalizeCode("vault_conflict"), "AGENT_SETUP_IN_PROGRESS");
+  assert.equal(normalizeCode("accounts_required"), "SIGNER_OUTDATED");
   const e1 = Object.assign(new Error("dup"), { code: "key_reused" });
   assert.equal(envelopeFromError(e1).error.code, "KEY_REUSED");
   // a signer error whose text mentions "does not exist" keeps its own code
@@ -338,7 +360,7 @@ test("agentHealth signal 2: userRole must be agent of THIS main", () => {
   assert.equal(h(null).code, "AGENT_INVALID");
 });
 
-test("agentHealth: no key at all is invalid; requireValidAgent hints rotate", () => {
+test("agentHealth: no key at all is invalid; requireValidAgent hints setup_agent", () => {
   const h = classifyAgentHealth({ agents: [], role: null, main: MAIN, agentAddress: null, now: NOW });
   assert.equal(h.code, "AGENT_INVALID");
   try {
@@ -347,17 +369,17 @@ test("agentHealth: no key at all is invalid; requireValidAgent hints rotate", ()
   } catch (e) {
     assert.equal(e.code, "AGENT_INVALID");
     assert.equal(e.status, "needs_agent");
-    assert.match(e.hint, /setup_agent\.mjs --rotate/);
+    assert.match(e.hint, /setup_agent\.mjs/);
   }
   assert.doesNotThrow(() => requireValidAgent({ valid: true, code: "AGENT_EXPIRING" }));
 });
 
 // --- exchange error mapping ------------------------------------------------
 
-test("signal 3: 'does not exist' -> AGENT_INVALID with rotate hint", () => {
+test("signal 3: 'does not exist' -> AGENT_INVALID with a setup_agent hint", () => {
   const m = mapExchangeError("User or API Wallet 0x42b0519883930ad9791de0f38387fcf18fe2b9d4 does not exist.");
   assert.equal(m.code, "AGENT_INVALID");
-  assert.match(m.hint, /setup_agent\.mjs --rotate/);
+  assert.match(m.hint, /setup_agent\.mjs/);
   assert.match(m.message, /does not exist/);
 });
 
@@ -455,6 +477,14 @@ test("computeNext decisions", () => {
   assert.equal(computeNext({ hl: hl({ role: "missing" }), agent: ok }).status, "needs_deposit");
   assert.equal(computeNext({ hl: hl({ spotUsdcFree: 1 }), agent: ok }).status, "needs_deposit");
   assert.equal(computeNext({ hl: hl({ spotUsdcFree: 5 }), agent: { valid: false, everCreated: true } }).status, "needs_agent");
+  const pending = computeNext({ hl: hl({ spotUsdcFree: 5 }), agent: { valid: false, everCreated: false, vaultState: "pending" } });
+  assert.equal(pending.status, "needs_agent");
+  assert.equal(pending.code, "AGENT_INVALID");
+  assert.equal(pending.vaultState, "pending");
+  assert.match(pending.reason, /setup_agent\.mjs/);
+  assert.equal(pending.rotate, false);
+  const down = computeNext({ hl: hl({ spotUsdcFree: 5 }), agent: { valid: false, vaultCode: "VAULT_UNAVAILABLE", reason: "down" } });
+  assert.equal(down.code, "VAULT_UNAVAILABLE");
   assert.equal(computeNext({ hl: hl({ perpsWithdrawable: 5 }), agent: ok }).status, "needs_spot");
   assert.equal(computeNext({ hl: hl({ unified: true, spotUsdcFree: 5 }), agent: ok }).status, "ready");
   assert.equal(computeNext({ hl: hl({ unified: true, spotUsdcFree: 5 }), agent: { valid: true, code: "AGENT_EXPIRING", daysLeft: 10, mustRotate: false } }).status, "ready");
@@ -472,7 +502,7 @@ test("decimalString / ceilCents / agentNameFor", () => {
   assert.equal(agentNameFor({ isDev: false }), "Butler");
   const prev = process.env.DEV_AGENT_NAME;
   delete process.env.DEV_AGENT_NAME;
-  assert.equal(agentNameFor({ isDev: true }), "bevo-dev");
+  assert.equal(agentNameFor({ isDev: true }), "bevo");
   if (prev !== undefined) process.env.DEV_AGENT_NAME = prev;
 });
 
@@ -579,11 +609,375 @@ test("withdrawLedgerHit also matches Hyperliquid's microsecond nonce", () => {
 test("assertKeyFresh: a key the ledger holds is KEY_REUSED before any other check", async () => {
   const asked = [];
   const signer = (state) => ({ keyStatus: async (key, opts) => (asked.push([key, opts.route]), { state }) });
-  await assertKeyFresh(signer("not_found"), "bet-1", { route: "agent_key" });
-  assert.deepEqual(asked, [["bet-1:1", "agent_key"]]);
-  await assert.rejects(assertKeyFresh(signer("executed"), "bet-1", { route: "agent_key" }), (e) => e.code === "KEY_REUSED");
+  await assertKeyFresh(signer("not_found"), "dep-1");
+  assert.deepEqual(asked, [["dep-1:1", "execute"]]);
+  await assert.rejects(assertKeyFresh(signer("executed"), "dep-1"), (e) => e.code === "KEY_REUSED");
   await assert.rejects(assertKeyFresh(signer("manual"), "dep-1", { resumeHint: "resume it" }), (e) => e.hint === "resume it");
   await assertKeyFresh({}, "bet-1");
   await assertKeyFresh({ keyStatus: async () => null }, "bet-1");
   await assertKeyFresh({ keyStatus: async () => { throw new Error("down"); } }, "bet-1");
+});
+
+// --- trading key lifecycle (fake signer, stubbed Hyperliquid) ----------------------
+
+const NEW_AGENT = "0x1111111111111111111111111111111111111111";
+const FAKE_SIGNATURE = `0x${"11".repeat(32)}${"22".repeat(32)}1b`;
+
+function hlStub({ agents = [], role = { role: "agent", data: { user: MAIN } } } = {}) {
+  const state = { agents: [...agents], exchangeCalls: 0 };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (String(url).endsWith("/exchange")) {
+      state.exchangeCalls++;
+      state.agents.push({ address: body.action.agentAddress, name: body.action.agentName, validUntil: Date.now() + 90 * DAY });
+      return new Response(JSON.stringify({ status: "ok" }));
+    }
+    if (body.type === "extraAgents") return new Response(JSON.stringify(state.agents));
+    if (body.type === "userRole") return new Response(JSON.stringify(role));
+    throw new Error(`unexpected HL call ${body.type}`);
+  };
+  state.restore = () => {
+    globalThis.fetch = realFetch;
+  };
+  return state;
+}
+
+function fakeKey(address, o = {}) {
+  const calls = { markApproved: [], forget: 0 };
+  return {
+    calls,
+    id: `outcome.${MAIN}`,
+    address,
+    approvedAt: null,
+    validUntil: null,
+    generated: false,
+    pending: null,
+    markApproved: async (a) => {
+      calls.markApproved.push(a);
+    },
+    forget: async () => {
+      calls.forget++;
+    },
+    ...o,
+  };
+}
+
+function fakeSignerMod({ stored = null, onFresh, throws = null, readThrows = null }) {
+  const calls = [];
+  return {
+    calls,
+    isDev: true,
+    agentKey: async (opts) => {
+      calls.push(opts);
+      if (throws) throw throws;
+      if (readThrows && opts.create === false) throw readThrows;
+      if (opts.create === false) return stored;
+      return onFresh(opts);
+    },
+  };
+}
+
+const mainSignerFake = (approval, signed = []) => ({
+  address: MAIN,
+  approval,
+  signTypedData: async (td) => {
+    signed.push(td);
+    return FAKE_SIGNATURE;
+  },
+});
+
+test("ensureAgent: a key Hyperliquid lists is used as is, nothing is written when the vault already says so", async () => {
+  const validUntil = Date.now() + 60 * DAY;
+  const hl = hlStub({ agents: [{ address: AGENT, name: "Butler", validUntil }] });
+  try {
+    const stored = fakeKey(AGENT, { approvedAt: "2026-11-01T00:00:00.000Z", validUntil: new Date(validUntil).toISOString() });
+    const mod = fakeSignerMod({ stored });
+    const { agent, health } = await ensureAgent({ signerMod: mod, signer: mainSignerFake("auto") });
+    assert.equal(agent, stored);
+    assert.equal(health.code, "AGENT_OK");
+    assert.equal(stored.calls.markApproved.length, 0);
+    assert.equal(mod.calls.length, 1);
+    assert.equal(hl.exchangeCalls, 0);
+    assert.equal(hl.agents.length, 1);
+
+    const unrecorded = fakeKey(AGENT);
+    await ensureAgent({ signerMod: fakeSignerMod({ stored: unrecorded }), signer: mainSignerFake("card") });
+    assert.equal(unrecorded.calls.markApproved.length, 1);
+    assert.equal(unrecorded.calls.markApproved[0].validUntil, new Date(validUntil).toISOString());
+  } finally {
+    hl.restore();
+  }
+});
+
+test("ensureAgent: an unlisted key with approval auto is replaced through one ApproveAgent signature", async () => {
+  const hl = hlStub();
+  try {
+    const fresh = fakeKey(NEW_AGENT, { generated: true });
+    const mod = fakeSignerMod({ stored: fakeKey(AGENT), onFresh: () => fresh });
+    const signed = [];
+    const { agent, health } = await ensureAgent({ signerMod: mod, signer: mainSignerFake("auto", signed) });
+    assert.equal(agent, fresh);
+    assert.equal(health.code, "AGENT_OK");
+    assert.equal(signed.length, 1);
+    assert.match(signed[0].primaryType, /ApproveAgent$/);
+    assert.equal(hl.exchangeCalls, 1);
+    assert.equal(fresh.calls.markApproved.length, 1);
+    assert.equal(mod.calls[1].rotate, true);
+    assert.equal(mod.calls[1].create, true);
+    assert.equal(typeof mod.calls[1].accounts.generatePrivateKey, "function");
+  } finally {
+    hl.restore();
+  }
+});
+
+test("ensureAgent: an unlisted key with approval card asks the owner to run setup_agent", async () => {
+  const hl = hlStub();
+  try {
+    const mod = fakeSignerMod({ stored: fakeKey(AGENT), onFresh: () => assert.fail("must not make a key") });
+    await assert.rejects(ensureAgent({ signerMod: mod, signer: mainSignerFake("card") }), (e) => {
+      assert.equal(e.code, "AGENT_INVALID");
+      assert.equal(e.status, "needs_agent");
+      assert.match(e.hint, /setup_agent\.mjs/);
+      return true;
+    });
+    assert.equal(mod.calls.length, 1);
+  } finally {
+    hl.restore();
+  }
+});
+
+const vaultPendingErr = () => Object.assign(new Error("the vault is waiting to be restored from the owner's phone"), { code: "vault_pending" });
+
+test("readStoredAgent: a pending vault is no key here, other vault errors still throw", async () => {
+  const pending = await readStoredAgent(fakeSignerMod({ readThrows: vaultPendingErr() }));
+  assert.deepEqual(pending, { agent: null, vaultState: "pending" });
+  const none = await readStoredAgent(fakeSignerMod({ stored: null }));
+  assert.deepEqual(none, { agent: null, vaultState: null });
+  const down = Object.assign(new Error("unreachable"), { code: "vault_unavailable" });
+  await assert.rejects(readStoredAgent(fakeSignerMod({ readThrows: down })), (e) => e.code === "vault_unavailable");
+});
+
+for (const [label, opts] of [
+  ["a pending read that throws", { readThrows: vaultPendingErr() }],
+  ["a pending read answered null", { stored: null }],
+]) {
+  test(`ensureAgent: ${label} with approval auto bootstraps a fresh key`, async () => {
+    const hl = hlStub();
+    try {
+      const fresh = fakeKey(NEW_AGENT, { generated: true });
+      const mod = fakeSignerMod({ ...opts, onFresh: () => fresh });
+      const signed = [];
+      const { agent, health } = await ensureAgent({ signerMod: mod, signer: mainSignerFake("auto", signed) });
+      assert.equal(agent, fresh);
+      assert.equal(health.code, "AGENT_OK");
+      assert.equal(signed.length, 1);
+      assert.equal(mod.calls[1].create, true);
+      assert.equal(mod.calls[1].rotate, true);
+      assert.equal(fresh.calls.markApproved.length, 1);
+    } finally {
+      hl.restore();
+    }
+  });
+}
+
+test("ensureAgent: a pending vault with approval card points to setup_agent, never to waiting", async () => {
+  const mod = fakeSignerMod({ readThrows: vaultPendingErr(), onFresh: () => assert.fail("must not make a key") });
+  await assert.rejects(ensureAgent({ signerMod: mod, signer: mainSignerFake("card") }), (e) => {
+    assert.equal(e.code, "AGENT_INVALID");
+    assert.equal(e.status, "needs_agent");
+    assert.match(e.hint, /setup_agent\.mjs/);
+    assert.equal(e.data.vaultState, "pending");
+    assert.doesNotMatch(e.message, /phone to sync|open Virtuals/);
+    return true;
+  });
+  assert.equal(mod.calls.length, 1);
+  const env = envelopeFromError(vaultPendingErr());
+  assert.equal(env.error.code, "VAULT_PENDING");
+  assert.match(env.error.hint, /setup_agent\.mjs/);
+});
+
+test("bootstrapAgent: the loser of a key race waits for the winner's key and signs nothing", async () => {
+  const hl = hlStub({ agents: [{ address: NEW_AGENT, name: "Butler", validUntil: Date.now() + 90 * DAY }] });
+  try {
+    const winner = fakeKey(NEW_AGENT, { generated: false });
+    const mod = fakeSignerMod({ onFresh: () => winner });
+    const signed = [];
+    const out = await bootstrapAgent({ signerMod: mod, signer: mainSignerFake("auto", signed) });
+    assert.equal(out.adopted, true);
+    assert.equal(out.agent, winner);
+    assert.equal(signed.length, 0);
+    assert.equal(hl.exchangeCalls, 0);
+    assert.equal(winner.calls.markApproved.length, 1);
+  } finally {
+    hl.restore();
+  }
+});
+
+test("bootstrapAgent: a resume of another key is RESUME_MISMATCH", async () => {
+  const mod = fakeSignerMod({ stored: fakeKey(AGENT) });
+  await assert.rejects(
+    bootstrapAgent({ signerMod: mod, signer: mainSignerFake("auto"), rec: { agentAddress: NEW_AGENT, agentName: "Butler", nonce: 1 } }),
+    (e) => e.code === "RESUME_MISMATCH",
+  );
+  assert.equal(mod.calls[0].create, false);
+  assert.equal(mod.calls[0].rotate, false);
+});
+
+test("orderCloid: deterministic 16-byte hex, different per script, key and leg", () => {
+  const a = orderCloid("place_bet", "pm-bet-1");
+  assert.match(a, /^0x[0-9a-f]{32}$/);
+  assert.equal(orderCloid("place_bet", "pm-bet-1"), a);
+  assert.notEqual(orderCloid("place_bet", "pm-bet-2"), a);
+  assert.notEqual(orderCloid("cancel", "pm-bet-1"), a);
+  assert.notEqual(orderCloid("place_bet", "pm-bet-1", 0), a);
+  assert.notEqual(orderCloid("place_bet", "pm-bet-1", 0), orderCloid("place_bet", "pm-bet-1", 1));
+  assert.equal(orderCloid("place_bet", "pm-bet-1", 1), orderCloid("place_bet", "pm-bet-1", "1"));
+});
+
+function orderVenueStub({ known = null, exchangeError = null } = {}) {
+  const state = { info: [], exchange: [] };
+  const realFetch = globalThis.fetch;
+  const json = (body) => new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
+  globalThis.fetch = async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (String(url).endsWith("/exchange")) {
+      state.exchange.push(body);
+      if (exchangeError) return json({ status: "ok", response: { type: "order", data: { statuses: [{ error: exchangeError }] } } });
+      return json({ status: "ok", response: { type: "order", data: { statuses: [{ resting: { oid: 42, cloid: body.action.orders[0].c } }] } } });
+    }
+    state.info.push(body);
+    if (body.type === "orderStatus") {
+      return json(known ? { status: "order", order: { order: { cloid: body.oid }, status: known, statusTimestamp: NOW } } : { status: "unknownOid" });
+    }
+    return json(null);
+  };
+  state.restore = () => {
+    globalThis.fetch = realFetch;
+  };
+  return state;
+}
+
+async function testAgent() {
+  const { generatePrivateKey, privateKeyToAccount } = await import("viem/accounts");
+  const account = privateKeyToAccount(generatePrivateKey());
+  return { address: account.address, toViemAccount: () => account, pending: null };
+}
+
+const testWire = (cloid) => outcomeOrderWire({ assetId: 100373480, side: "buy", price: "0.47", size: 40, tif: "GTC", cloid });
+
+test("placeOutcomeOrder: a cloid Hyperliquid already knows is KEY_REUSED and nothing is submitted", async () => {
+  const cloid = orderCloid("place_bet", "pm-bet-dup");
+  const stub = orderVenueStub({ known: "filled" });
+  try {
+    await assert.rejects(
+      placeOutcomeOrder({ agent: await testAgent(), trap: pendingTrap(), main: MAIN, wire: testWire(cloid) }),
+      (e) => e.code === "KEY_REUSED" && e.data.venueStatus === "filled" && e.data.cloid === cloid,
+    );
+    assert.deepEqual(stub.info, [{ type: "orderStatus", user: MAIN, oid: cloid }]);
+    assert.equal(stub.exchange.length, 0);
+  } finally {
+    stub.restore();
+  }
+});
+
+test("placeOutcomeOrder: an unknown cloid is submitted carrying that cloid", async () => {
+  const cloid = orderCloid("place_bet", "pm-bet-new");
+  const stub = orderVenueStub();
+  try {
+    const res = await placeOutcomeOrder({ agent: await testAgent(), trap: pendingTrap(), main: MAIN, wire: testWire(cloid) });
+    assert.equal(stub.exchange.length, 1);
+    const order = stub.exchange[0].action.orders[0];
+    assert.equal(order.c, cloid);
+    assert.equal(order.a, 100373480);
+    assert.equal(order.b, true);
+    assert.deepEqual(order.t, { limit: { tif: "Gtc" } });
+    assert.deepEqual(res, { orderId: "42", orderStatus: "resting", filledShares: null, cloid });
+  } finally {
+    stub.restore();
+  }
+});
+
+test("placeOutcomeOrder: Hyperliquid refusing a duplicate cloid on submit is KEY_REUSED", async () => {
+  const cloid = orderCloid("place_bet", "pm-bet-race");
+  const stub = orderVenueStub({ exchangeError: "Duplicate cloid" });
+  try {
+    await assert.rejects(
+      placeOutcomeOrder({ agent: await testAgent(), trap: pendingTrap(), main: MAIN, wire: testWire(cloid) }),
+      (e) => e.code === "KEY_REUSED" && e.data.cloid === cloid,
+    );
+  } finally {
+    stub.restore();
+  }
+});
+
+test("assertCloidFresh, orderSubmitFailure and isDuplicateCloidError", async () => {
+  await assertCloidFresh(MAIN, "0x" + "ab".repeat(16), async () => ({ status: "unknownOid" }));
+  await assert.rejects(
+    assertCloidFresh(MAIN, "0x" + "ab".repeat(16), async () => ({ status: "order", order: { status: "canceled" } })),
+    (e) => e.code === "KEY_REUSED" && e.data.venueStatus === "canceled",
+  );
+  assert.equal(isDuplicateCloidError("Order 0: Insufficient spot balance"), false);
+  const api = Object.assign(new Error("Order 0: Insufficient spot balance"), { name: "ApiRequestError" });
+  assert.equal(orderSubmitFailure(api, "0x1").code, "INSUFFICIENT_BALANCE");
+  const lost = orderSubmitFailure(new Error("fetch failed"), "0x1", { marketId: "1" });
+  assert.equal(lost.code, "ORDER_UNKNOWN");
+  assert.equal(lost.data.cloid, "0x1");
+  assert.equal(orderSubmitFailure(Object.assign(new Error("bad"), { name: "ValidationError" }), "0x1").code, "ORDER_INVALID");
+  assert.throws(() => outcomeOrderWire({ assetId: 1, side: "buy", price: "0.5", size: 4, tif: "FOK", cloid: "0x1" }), (e) => e.code === "BAD_ARGS");
+});
+
+test("classifyCancelStatuses: an order already cancelled or filled counts as done, not failed", () => {
+  const targets = [{ oid: 1, marketId: "5", coin: "#50" }, { oid: 2, marketId: "5", coin: "#51" }, { oid: 3, marketId: "5", coin: "#50" }];
+  const r = classifyCancelStatuses(targets, [
+    "success",
+    { error: "Order was never placed, already canceled, or filled. asset=100000051" },
+    { error: "Insufficient margin" },
+  ]);
+  assert.deepEqual(r.cancelled.map((x) => x.orderId), ["1"]);
+  assert.deepEqual(r.alreadyDone.map((x) => x.orderId), ["2"]);
+  assert.deepEqual(r.failed.map((x) => x.orderId), ["3"]);
+});
+
+test("labelAgents: only our name with no stored key is the revoke placeholder; other names are never ours", () => {
+  const agents = [
+    { address: AGENT, name: "Butler", validUntil: null },
+    { address: NEW_AGENT, name: "outcome.xyz", validUntil: null },
+  ];
+  const revoked = labelAgents(agents, { ourName: "Butler", storedAddress: null, keyKnown: true }, NOW);
+  assert.deepEqual(revoked.map((a) => [a.name, a.ours, a.placeholder]), [["Butler", true, true], ["outcome.xyz", false, false]]);
+  const live = labelAgents(agents, { ourName: "Butler", storedAddress: AGENT, keyKnown: true }, NOW);
+  assert.equal(live[0].placeholder, false);
+  const pending = labelAgents(agents, { ourName: "Butler", storedAddress: null, keyKnown: false }, NOW);
+  assert.equal(pending[0].placeholder, false);
+  const addressMode = labelAgents(agents, {}, NOW);
+  assert.deepEqual(addressMode.map((a) => a.ours), [false, false]);
+  assert.equal(revoked[0].address, AGENT);
+  assert.equal(revoked[0].approved, true);
+});
+
+test("deposit guidance points to acp's move into Hyperliquid first, sending at least 5.5 so 5 is credited", () => {
+  assert.equal(acpDepositCommand(12.5), "acp trade --token-in usdc --amount-in 12.5 --token-out usdc --chain-out 1337 --idempotency-key <new key> --json");
+  assert.match(acpDepositCommand(1), /--amount-in 5\.5 /);
+  assert.match(acpDepositCommand(5), /--amount-in 5\.5 /);
+  assert.match(acpDepositCommand(5.51), /--amount-in 5\.51 /);
+  assert.doesNotMatch(acpDepositCommand(7), /--recipient /);
+  const hint = depositShortfallHint(6);
+  assert.ok(hint.indexOf("acp trade") < hint.indexOf("Arbitrum"));
+  const hl = { role: "missing", unified: false, spotUsdcFree: 0, perpsWithdrawable: 0 };
+  const next = computeNext({ hl, arb: { usdc: 0 }, agent: null, need: 2 });
+  assert.equal(next.status, "needs_deposit");
+  assert.equal(next.suggestedDepositUsdc, 5);
+  assert.equal(next.depositCommand, acpDepositCommand(5.5));
+  assert.equal(next.firstDeposit, true);
+  assert.match(next.creditNote, /~1 USDC/);
+  const first = computeNext({ hl, arb: null, agent: null, need: 10 });
+  assert.equal(first.acpSendUsdc, 11.5);
+  assert.match(first.depositCommand, /--amount-in 11\.5 /);
+  const topUp = computeNext({ hl: { ...hl, role: "user", spotUsdcFree: 1 }, arb: null, agent: null, need: 20 });
+  assert.equal(topUp.firstDeposit, false);
+  assert.equal(topUp.acpSendUsdc, 19.3);
+  assert.doesNotMatch(topUp.creditNote, /~1 USDC/);
+  assert.match(topUp.creditNote, /never wait for the full amount/);
+  assert.match(next.fallback, /deposit\.mjs --amount 5/);
 });

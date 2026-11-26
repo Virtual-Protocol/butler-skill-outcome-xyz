@@ -13,7 +13,10 @@
 // Duties pass their slot key as --idempotency-key so a re-fire cannot bet twice.
 
 import {
-  assertKeyFresh,
+  assertCloidFresh,
+  orderCloid,
+  outcomeOrderWire,
+  placeOutcomeOrder,
   runScript,
   parseArgs,
   okEnvelope,
@@ -22,15 +25,11 @@ import {
   validateOrder,
   resolveSideIndex,
   readHlBalances,
-  agentHealth,
-  requireValidAgent,
-  hip4AgentSigner,
+  ensureAgent,
   pendingTrap,
-  placeOrderFailure,
   ceilCents,
   SkillError,
   SIGNER_FLAGS,
-  AGENT_KEY_LABEL,
   idempotencyKeyFrom,
   scriptDeadline,
 } from "./lib/common.mjs";
@@ -65,9 +64,11 @@ runScript(async () => {
     if (!TIFS.has(tif)) throw new SkillError("BAD_ARGS", "--tif must be GTC, ALO or FAK");
     const signerMod = await loadSigner();
     const idempotencyKey = idempotencyKeyFrom(args, "place_bet", { isDev: Boolean(signerMod.isDev) });
-    await assertKeyFresh(signerMod, idempotencyKey, { route: "agent_key" });
     const order = validateOrder({ size: args.size, price: args.price, side, isDev: Boolean(signerMod.isDev) });
-    const main = (await signerMod.mainSigner({ idempotencyKey, deadline: scriptDeadline() })).address;
+    const signer = await signerMod.mainSigner({ idempotencyKey, deadline: scriptDeadline() });
+    const main = signer.address;
+    const cloid = orderCloid("place_bet", idempotencyKey);
+    await assertCloidFresh(main, cloid);
 
     const hip4 = await createHip4();
     try {
@@ -84,14 +85,7 @@ runScript(async () => {
       const sideIndex = resolveSideIndex(args.outcome, market.sides);
       const coin = market.sides[sideIndex].coin;
 
-      const agent = await signerMod.agentKey({
-        label: AGENT_KEY_LABEL,
-        rotate: false,
-        create: false,
-        idempotencyKey,
-        deadline: scriptDeadline(),
-      });
-      const health = requireValidAgent(await agentHealth(main, agent?.address ?? null));
+      const { agent, health } = await ensureAgent({ signerMod, signer });
 
       const hl = await readHlBalances(main);
       if (side === "buy" && hl.spotUsdcFree < order.notional) {
@@ -111,19 +105,6 @@ runScript(async () => {
         }
       }
 
-      const trap = pendingTrap();
-      await hip4.auth.initAuth(main, hip4AgentSigner(agent, trap));
-      const res = await hip4.trading.placeOrder({
-        marketId: args.market,
-        outcome: coin,
-        side,
-        type: "limit",
-        price: args.price,
-        amount: String(order.size),
-        timeInForce: tif,
-      });
-      trap.check(agent); // hip4 folds signer errors into the result; an owner wait must surface
-
       const summary = {
         marketId: args.market,
         market: market.parsedName ?? market.name,
@@ -137,11 +118,21 @@ runScript(async () => {
         tif,
         agentHealth: health.code,
         idempotencyKey,
+        cloid,
       };
-      if (res.success) {
-        return okEnvelope("done", { ...summary, orderId: res.orderId ?? null, orderStatus: res.status ?? null, filledShares: res.shares ?? null });
-      }
-      throw placeOrderFailure(res, summary);
+      const { sideAssetId, formatOutcomePrice, parseSideCoin } = await import("@outcome.xyz/hip4");
+      const sideCoin = parseSideCoin(coin);
+      if (!sideCoin) throw new SkillError("MARKET_NOT_TRADABLE", `Side coin ${coin} is not an outcome side.`);
+      const wire = outcomeOrderWire({
+        assetId: sideAssetId(sideCoin.outcomeId, sideCoin.sideIndex),
+        side,
+        price: formatOutcomePrice(args.price),
+        size: order.size,
+        tif,
+        cloid,
+      });
+      const res = await placeOutcomeOrder({ agent, trap: pendingTrap(), main, wire, errorData: summary });
+      return okEnvelope("done", { ...summary, orderId: res.orderId, orderStatus: res.orderStatus, filledShares: res.filledShares });
     } finally {
       hip4.destroy();
     }

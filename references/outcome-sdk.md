@@ -57,8 +57,9 @@ scripts do, with `@outcome.xyz/hip4` pinned at **1.3.0** (mainnet, `testnet: fal
 - Orders from one trading key must go one at a time: the SDK uses the millisecond clock as
   the action nonce, so two orders in parallel can collide.
 - An order result that is neither accepted nor rejected (network failure after sending)
-  is `ORDER_UNKNOWN`: Hyperliquid may have it. There is no client order id, so the only way
-  to know is `account.mjs` (open orders and fills).
+  is `ORDER_UNKNOWN`: Hyperliquid may have it. Every order carries a client order id derived
+  from the idempotency key, so re-running with the same key is safe (`KEY_REUSED` if the
+  venue has it); `account.mjs` shows the order or fill.
 - Fees: Hyperliquid's spot rates; Outcome.xyz currently charges no builder fee, and this
   skill attaches none.
 
@@ -81,7 +82,7 @@ scripts do, with `@outcome.xyz/hip4` pinned at **1.3.0** (mainnet, `testnet: fal
 | --- | --- |
 | `markets.mjs` | `events.fetchMarkets({sortBy:"volume"})`, `client.fetchAllMids()`, `marketData.fetchOrderBook(id, side)` for `--id`, `client.fetchSettledOutcome(id)`, `parseInstanceDescription` and friends for expiry/threshold |
 | `account.mjs` | `account.fetchPositions`, `account.fetchOpenOrders`, `client.fetchUserFillsByTime`, `client.fetchSettledOutcome`, Hyperliquid `spotClearinghouseState` |
-| `place_bet.mjs` | `events.fetchMarkets` (find the market and side coin), `auth.initAuth(mainWallet, tradingKey)`, `trading.placeOrder({marketId, outcome: coin, side, type:"limit", price, amount: shares, timeInForce})` |
+| `place_bet.mjs` | `events.fetchMarkets` (find the market and side coin), `parseSideCoin` + `sideAssetId` + `formatOutcomePrice`, Hyperliquid `orderStatus` for the cloid, then `@nktkas/hyperliquid` `ExchangeClient.order({orders:[{a, b, p, s, r:false, t:{limit:{tif}}, c: cloid}], grouping:"na"})` signed by the trading key (hip4's `placeOrder` has no cloid field) |
 | `cancel.mjs` | `account.fetchOpenOrders`, `parseSideCoin`, `trading.cancelOrder([{marketId, orderId, outcome}])` (the side coin is always passed, otherwise a NO order would not be cancelled) |
 | `setup_agent.mjs` | `getAgentApprovalTypedData(agent, name, nonce, true)`, main-wallet signature, `submitAgentApproval(...)`, then Hyperliquid `extraAgents` until listed |
 | `status.mjs`, `ensure_spot.mjs`, `deposit.mjs` | Hyperliquid info API and `@nktkas/hyperliquid` (see `hyperliquid-sdk.md`) |
@@ -95,9 +96,10 @@ scripts do, with `@outcome.xyz/hip4` pinned at **1.3.0** (mainnet, `testnet: fal
 ## SDK gotchas the scripts already handle
 
 - The adapter defaults to **testnet**; the scripts force mainnet.
-- `placeOrder` never throws: failures come back in the result, so the scripts classify them
-  (`ORDER_INVALID` before sending, `EXCHANGE_ERROR` family when Hyperliquid refused,
-  `ORDER_UNKNOWN` when the answer was lost).
+- hip4's `trading.placeOrder` takes no client order id, so `place_bet.mjs` sends the order
+  through `@nktkas/hyperliquid` (wire field `c`). Its failures are classified the same way:
+  `ORDER_INVALID` before sending, `EXCHANGE_ERROR` family when Hyperliquid refused,
+  `KEY_REUSED` for a duplicate cloid, `ORDER_UNKNOWN` when the answer was lost.
 - The SDK's `agentStatus()` treats a key with no expiry as expired; the scripts use their
   own check (`extraAgents` plus `userRole`).
 - `fetchSettledOutcome` lives on `hip4.client`, not on `hip4.events` as the README says.
