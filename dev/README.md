@@ -11,7 +11,7 @@ Dependencies live at the **skill root** (`package.json`, `package-lock.json`, `n
 never under `scripts/` (Mastra scans `scripts/` recursively). Node resolves them upward.
 
 ```bash
-cd butler-skills-suite/butler-skill-prediction-market   # or this worktree: the SKILL ROOT
+cd butler-skills-suite/butler-skill-outcome-xyz   # or this worktree: the SKILL ROOT
 npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 
 # Load the test wallet from bevo-server/.env without printing anything
@@ -35,7 +35,7 @@ Never echo these variables.
 ### The file vault
 
 The agent key lives in `dev/.vault.json` (mode 0600, gitignored), shaped like the container's
-vault: item `outcome.<lowercase wallet>`, kind `venue_credentials`, value
+vault: item `outcomexyz.<lowercase wallet>`, kind `venue_credentials`, value
 `{"agent_key": {secret, address, agentName, createdAt, approvedAt, validUntil}}`, with the
 same etag and compare-and-swap rules as the vault socket. `getSecret`, `saveSecret`,
 `updateSecret`, `deleteSecret` and `venueCredentialName` are exported too.
@@ -49,7 +49,7 @@ it against Hyperliquid before use, so a replaced key shows as `AGENT_INVALID`. T
 ### L0.5 (scripts + local signer, no bevo-server)
 
 ```bash
-cd butler-skills-suite/butler-skill-prediction-market   # or this worktree
+cd butler-skills-suite/butler-skill-outcome-xyz   # or this worktree
 export PATH="$HOME/.nvm/versions/node/v24.22.3/bin:$PATH"
 npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 set -a; source <(grep -E '^(OUTCOME_MAIN_WALLET|OUTCOME_AGENT_PRIVATE_KEY)=' \
@@ -112,7 +112,7 @@ Resume rules:
   resumable**: when the signer sets `.pending` or a wallet card times out they print
   `authorization_timeout`.
 - Wallet steps (`deposit`, `setup_agent`, `revoke_agent`, `withdraw`) are resumable: the step is saved to
-  `$HOME/.cache/prediction-market/pending/<key>.json`; `--resume <key>` repeats the signer call
+  `$HOME/.cache/outcome-xyz/pending/<key>.json`; `--resume <key>` repeats the signer call
   with the same idempotency key (the signer returns the owner's signature / tx) and finishes.
 - Every signing script takes `--idempotency-key <key>` (default: generated). Duties pass their
   slot key so a re-fire cannot bet twice: deposit and withdraw are refused by the signer's

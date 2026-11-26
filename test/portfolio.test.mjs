@@ -332,7 +332,7 @@ test("venue precheck reports only # bets and their orders, with freeUsd 0", asyn
     books: { "#291020": "0.49" },
   });
   const out = await precheckVenue({ address: WALLET }, { info: venue.info });
-  assert.equal(out.venue, "outcome");
+  assert.equal(out.venue, "outcomexyz");
   assert.equal(out.readable, true);
   assert.equal(out.freeUsd, 0);
   assert.equal(out.inTransitUsd, 0);
@@ -372,7 +372,7 @@ test("venue precheck holds a bet worth $2 at mid that sells under $2, or has no 
 test("venue precheck: a Solana address is readable and empty, an HL error is unreadable", async () => {
   const venue = fakeVenueInfo({ balances: [{ coin: "+291020", total: "25", hold: "0" }] });
   const sol = await precheckVenue({ address: "7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV" }, { info: venue.info });
-  assert.deepEqual(sol, { venue: "outcome", readable: true, reason: null, freeUsd: 0, inTransitUsd: 0, positions: [], orders: [], held: [] });
+  assert.deepEqual(sol, { venue: "outcomexyz", readable: true, reason: null, freeUsd: 0, inTransitUsd: 0, positions: [], orders: [], held: [] });
   assert.equal(venue.calls.length, 0);
   const down = await precheckVenue({ address: WALLET }, fakeVenueInfo({ fail: new SkillError("HL_UNREACHABLE", "fetch failed") }));
   assert.equal(down.readable, false);
@@ -428,7 +428,7 @@ test("venue withdraw --all cancels, sells with Ioc at bid x 0.95, and never call
   const ex = fakeExchange(venue, { fill: (w) => (w.a === 1e8 + 291021 ? "none" : "all") });
   const out = await withdrawVenue({ walletId: VENUE_WALLET_ID, address: WALLET, mode: "all" }, venueDeps(venue, signer, ex));
   assert.equal(signer.calls.mainSigner, 0);
-  assert.deepEqual(signer.calls.agentKey.map((o) => [o.label, o.create]), [["outcome", false]]);
+  assert.deepEqual(signer.calls.agentKey.map((o) => [o.label, o.create]), [["outcomexyz", false]]);
   assert.deepEqual([...new Set(ex.calls)].sort(), ["cancel", "order"]);
   assert.equal(ex.orders.length, 2);
   for (const w of ex.orders) {
@@ -459,7 +459,7 @@ test("venue withdraw: an under-$2 sell is below_minimum, and a re-run with nothi
   const ex2 = fakeExchange(empty);
   for (const mode of ["all", "cash"]) {
     const out = await withdrawVenue({ walletId: VENUE_WALLET_ID, address: WALLET, mode }, venueDeps(empty, again, ex2));
-    assert.deepEqual(out, { venue: "outcome", mode, moved: [], pending: [], kept: [] });
+    assert.deepEqual(out, { venue: "outcomexyz", mode, moved: [], pending: [], kept: [] });
   }
   assert.deepEqual(ex2.calls, []);
   assert.equal(again.calls.mainSigner, 0);

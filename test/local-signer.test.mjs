@@ -37,7 +37,7 @@ async function withWallet(fn, { agentEnv = undefined } = {}) {
   if (agentEnv === undefined) delete process.env.OUTCOME_AGENT_PRIVATE_KEY;
   else process.env.OUTCOME_AGENT_PRIVATE_KEY = agentEnv;
   try {
-    await fn(address, `outcome.${address.toLowerCase()}`);
+    await fn(address, `outcomexyz.${address.toLowerCase()}`);
   } finally {
     process.env.OUTCOME_MAIN_WALLET = prevWallet;
     if (prevEnv === undefined) delete process.env.OUTCOME_AGENT_PRIVATE_KEY;
@@ -80,7 +80,7 @@ test("contract surface: AGENT_KEY_STORE and the vault functions", () => {
   for (const fn of ["getSecret", "saveSecret", "updateSecret", "deleteSecret", "venueCredentialName", "agentKey"]) {
     assert.equal(typeof signer[fn], "function", fn);
   }
-  assert.equal(signer.venueCredentialName("outcome", "0x6DCF5C604B5E6B8C28A6BE1C629387485037BEAC"), "outcome.0x6dcf5c604b5e6b8c28a6be1c629387485037beac");
+  assert.equal(signer.venueCredentialName("outcomexyz", "0x6DCF5C604B5E6B8C28A6BE1C629387485037BEAC"), "outcomexyz.0x6dcf5c604b5e6b8c28a6be1c629387485037beac");
   assert.equal(signer.venueCredentialName("Outcome", "0xabc"), null);
 });
 
@@ -103,7 +103,7 @@ test("get-or-generate: one venue_credentials item, then the same key; vault file
     assert.equal(first.pending, null);
     const item = storedItem(name);
     assert.equal(item.kind, "venue_credentials");
-    assert.match(item.label, /^outcome · 0x[0-9a-fA-F]{4}…[0-9a-fA-F]{4}$/);
+    assert.match(item.label, /^outcomexyz · 0x[0-9a-fA-F]{4}…[0-9a-fA-F]{4}$/);
     assert.equal(JSON.parse(item.value).agent_key.address, first.address);
     assert.equal(statSync(VAULT).mode & 0o777, 0o600);
     const second = await signer.agentKey({ accounts });
@@ -208,7 +208,7 @@ test("seeding: an old dev/.agent-key.json wins over the env key", async () => {
   await withWallet(
     async (address) => {
       const fileKey = generatePrivateKey();
-      writeFileSync(KEY_FILE, JSON.stringify({ label: "outcome", main: address, address: privateKeyToAccount(fileKey).address, privateKey: fileKey, approved: true, approvedAt: "2026-11-01T00:00:00.000Z", createdAt: "2026-10-30T00:00:00.000Z" }));
+      writeFileSync(KEY_FILE, JSON.stringify({ label: "outcomexyz", main: address, address: privateKeyToAccount(fileKey).address, privateKey: fileKey, approved: true, approvedAt: "2026-11-01T00:00:00.000Z", createdAt: "2026-10-30T00:00:00.000Z" }));
       try {
         const agent = await signer.agentKey({ accounts, create: false });
         assert.equal(agent.address, privateKeyToAccount(fileKey).address);
@@ -239,7 +239,7 @@ test("agent signTypedData: hip4 3-arg and viem object shapes agree, BigInts surv
 
 test("a full bootstrap prints addresses only: the output never holds a 64-hex string", async () => {
   await withMainKey(async (address) => {
-    const name = `outcome.${address.toLowerCase()}`;
+    const name = `outcomexyz.${address.toLowerCase()}`;
     const realFetch = globalThis.fetch;
     let approved = null;
     globalThis.fetch = async (url, init) => {

@@ -124,7 +124,7 @@ a withdrawal and nothing on a unified account.
 - Orders, cancels and perps→spot moves get their nonce inside the SDK at signing time, so
   they are never resumed. They are safe to re-run with the same key instead: an order
   carries a client order id (`cloid`, 16 bytes from sha256 of
-  `prediction-market|<script>|<key>`) that `orderStatus` looks up before sending; a cancel of
+  `outcome-xyz|<script>|<key>`) that `orderStatus` looks up before sending; a cancel of
   an order already gone is `alreadyDone`; a perps↔spot move only tops up the gap.
 
 ## Reads the scripts use (Hyperliquid info API)

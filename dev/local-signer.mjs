@@ -14,7 +14,7 @@
 //   signTypedData accepts (domain, types, value) AND ({ domain, types, primaryType, message }).
 //
 // The vault is the file dev/.vault.json (mode 0600, gitignored) with the same etag and
-// compare-and-swap rules as the container's vault socket. The item outcome.<wallet> holds
+// compare-and-swap rules as the container's vault socket. The item outcomexyz.<wallet> holds
 // {"agent_key": {secret, address, agentName, createdAt, approvedAt, validUntil}}. A name that
 // ever held an item is never seeded again, so a revoked key does not come back from the env.
 //
@@ -411,7 +411,7 @@ function keyObject({ name, label, main, accounts, stored, generated }) {
   return agent;
 }
 
-export async function agentKey({ label = "outcome", accounts, rotate = false, create = true, display, agentName } = {}) {
+export async function agentKey({ label = "outcomexyz", accounts, rotate = false, create = true, display, agentName } = {}) {
   if (typeof accounts?.generatePrivateKey !== "function" || typeof accounts?.privateKeyToAccount !== "function") {
     throw signerError("accounts_required", "agentKey needs the skill's viem/accounts as the accounts option.");
   }

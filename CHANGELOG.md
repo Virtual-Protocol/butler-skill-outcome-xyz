@@ -1,6 +1,13 @@
 # Changelog
 
-## 2.2.1
+## 2.3.0
+
+- Renamed: the skill is `outcome-xyz` (was `prediction-market`) and its repository is
+  `Virtual-Protocol/butler-skill-outcome-xyz`. Its scripts now live under
+  `$BEVO_SKILLS_DIR/outcome-xyz/scripts/`, and its pending store under `$HOME/.cache/outcome-xyz/`.
+- The teardown venue id is `outcomexyz` (was `outcome`).
+- The trading key's vault item is `outcomexyz.<wallet>` (was `outcome.<wallet>`). A key stored
+  under the old name is not found: the wallet approves a new trading key once (one `ApproveAgent`).
 
 - Every figure a script prints is a JSON number or `null`: `place_bet` `filledShares`, `account`
   orders and fills (`price`, `size`, `fee`) and positions, and `markets` `bestBid`/`bestAsk` used to

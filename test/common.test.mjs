@@ -263,11 +263,11 @@ test("idempotency keys: given, resume, generated, validated", () => {
   assert.equal(codeOf(() => idempotencyKeyFrom({ resume: "a", "idempotency-key": "b" }, "x")), "BAD_ARGS");
 });
 
-test("pending store under $HOME/.cache/prediction-market/pending (duty HOME respected)", () => {
+test("pending store under $HOME/.cache/outcome-xyz/pending (duty HOME respected)", () => {
   const prev = process.env.HOME;
   process.env.HOME = mkdtempSync(join(tmpdir(), "pm-home-"));
   try {
-    assert.equal(pendingDir(), join(process.env.HOME, ".cache", "prediction-market", "pending"));
+    assert.equal(pendingDir(), join(process.env.HOME, ".cache", "outcome-xyz", "pending"));
     savePending("pm-setup_agent-1", { script: "setup_agent", nonce: 123, agentAddress: AGENT, typedData: { message: { nonce: 123n } } });
     const rec = loadPending("pm-setup_agent-1", "setup_agent");
     assert.equal(rec.nonce, 123);

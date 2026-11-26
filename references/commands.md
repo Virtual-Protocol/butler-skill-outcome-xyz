@@ -1,6 +1,6 @@
 # Script reference
 
-Every script is `node "${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market/scripts/<name>.mjs"`.
+Every script is `node "${BEVO_SKILLS_DIR:-$HOME/skills}/outcome-xyz/scripts/<name>.mjs"`.
 Run them only after the one-time `npm ci` in `SKILL.md`. Flags are `--name value`,
 `--name=value` or a bare boolean `--flag`; an unknown flag, a positional argument or a flag
 given twice is refused with `BAD_ARGS` (exit code 2). Any other failure exits 1, success 0.
