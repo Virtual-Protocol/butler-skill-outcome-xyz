@@ -212,8 +212,8 @@ test("anything else is UNEXPECTED and a bad wallet is BAD_ARGS", async () => {
   await assert.rejects(getPositions("nope", deps(fakeHip4())), (e) => e.code === "BAD_ARGS");
 });
 
-test("reads --address, ignoring a --wallet id beside it, and still reads a lone --wallet address", () => {
-  assert.equal(readAddress({ wallet: "11111111-2222-4333-8444-555555555555", address: WALLET }), WALLET);
+test("reads --address, ignoring a --wallet-id beside it, and still reads a lone --wallet address", () => {
+  assert.equal(readAddress({ "wallet-id": "11111111-2222-4333-8444-555555555555", address: WALLET }), WALLET);
   assert.equal(readAddress({ wallet: WALLET }), WALLET);
   assert.throws(() => readAddress({}), (err) => err instanceof SkillError && err.code === "BAD_ARGS");
 });

@@ -2,8 +2,8 @@
 
 ## 2.1.1
 
-- `portfolio.mjs` reads the wallet from `--address`, and accepts the Butler's `--wallet <walletId>`
-  beside it. A lone `--wallet 0x...` still reads that address, as in 2.1.0.
+- `portfolio.mjs` reads the wallet from `--address`, and accepts the Butler's `--wallet-id <walletId>`
+  beside it. A lone `--wallet 0x...` still reads that address, as in 2.1.0 (deprecated).
 
 ## 2.1.0
 

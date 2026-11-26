@@ -162,8 +162,8 @@ printed but the JSON envelope; the exit code is always 0, so act on `ok` and `st
 node "${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market/scripts/portfolio.mjs" --address "$WALLET"
 ```
 
-The Butler's sync also passes `--wallet <walletId>` for a Butler wallet; the read uses
-`--address` only. A lone `--wallet 0x...` still reads that address.
+The Butler's sync also passes `--wallet-id <walletId>` for a Butler wallet; the read uses
+`--address` only. A lone `--wallet 0x...` (deprecated) still reads that address.
 
 ```json
 {"ok":true,"status":"done","data":{"wallet":"<the --address address>","asOf":"2026-11-25T10:00:00.000Z","currency":"USD","valueUsd":12.5,"availableUsd":null,"positions":[{"id":"#291020","market":"Bulgaria v Iceland","outcome":"YES","side":"Yes","size":25,"unit":"shares","entryPrice":0.45,"markPrice":0.5,"valueUsd":12.5,"pnlUsd":1.25,"details":[{"label":"Coin","value":"#291020"},{"label":"Pays if it wins (USD)","value":"25"}]}],"orders":null},"error":null}
