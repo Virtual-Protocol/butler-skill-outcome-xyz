@@ -922,9 +922,9 @@ export function orderSubmitFailure(err, cloid, data = null) {
   });
 }
 
-export async function placeOutcomeOrder({ agent, trap, main, wire, errorData = null, info = hlInfo }) {
+export async function placeOutcomeOrder({ agent, trap, main, wire, errorData = null, info = hlInfo, exchange = null }) {
   await assertCloidFresh(main, wire.c, info);
-  const exchange = await agentExchange(agent, trap);
+  exchange ??= await agentExchange(agent, trap);
   let res;
   try {
     res = await exchange.order({ orders: [wire], grouping: "na" });

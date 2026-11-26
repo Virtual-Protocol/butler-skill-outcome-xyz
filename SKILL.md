@@ -1,8 +1,8 @@
 ---
 name: prediction-market
 description: "Bet on Outcome.xyz prediction markets (Hyperliquid HIP-4): find markets, fund or withdraw from Hyperliquid, set up the trading key, place or cancel limit orders, read positions. Runs scripts."
-version: 2.1.1
-metadata: {"butler":{"moneyMoving":true,"portfolio":{"script":"scripts/portfolio.mjs","site":"https://outcome.xyz","name":"Outcome","chains":["evm"]},"keywords":["prediction market","outcome","outcome.xyz","HIP-4","hyperliquid prediction","bet on","buy yes","buy no","sell prediction","prediction positions","prediction balance","cancel prediction order","deposit hyperliquid","withdraw from hyperliquid","withdraw prediction","trading key"],"requires":{"bins":["acp","bevo-wallet","node","npm"]}}}
+version: 2.2.0
+metadata: {"butler":{"moneyMoving":true,"venue":{"id":"outcome","precheck":["node","scripts/venue.mjs","precheck"],"withdraw":["node","scripts/venue.mjs","withdraw"]},"portfolio":{"script":"scripts/portfolio.mjs","site":"https://outcome.xyz","name":"Outcome","chains":["evm"]},"keywords":["prediction market","outcome","outcome.xyz","HIP-4","hyperliquid prediction","bet on","buy yes","buy no","sell prediction","prediction positions","prediction balance","cancel prediction order","deposit hyperliquid","withdraw from hyperliquid","withdraw prediction","trading key"],"requires":{"bins":["acp","bevo-wallet","node","npm"]}}}
 ---
 
 ## When to use
@@ -187,6 +187,7 @@ from any chain. Each tick: status, then place_bet or cancel with the slot key.
 `walletScope: "main"` before the first money step: say in the duty's first note that it
 trades the owner's main wallet.
 Run the close sweep BEFORE the duty is deleted: `references/duty.md`.
+Teardown (when a duty wallet is closed): sells every Outcome bet at market and cancels open Outcome orders. The cash stays in the Hyperliquid account for the Butler's own sweep. Run via `scripts/venue.mjs` (precheck / withdraw).
 
 ## Idempotency and retries
 
