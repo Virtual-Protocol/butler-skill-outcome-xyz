@@ -162,7 +162,7 @@ printed but the JSON envelope; the exit code is always 0, so act on `ok` and `st
 node "${BEVO_SKILLS_DIR:-$HOME/skills}/prediction-market/scripts/portfolio.mjs" --address "$WALLET"
 ```
 
-The Butler's sync also passes `--wallet-id <walletId>` for a Butler wallet; the read uses
+The Butler's sync also passes `--walletid <walletId>` for a Butler wallet; the read uses
 `--address` only. A lone `--wallet 0x...` (deprecated) still reads that address.
 
 ```json
